@@ -1,0 +1,44 @@
+{
+  "name": "one-shot-the-oracle",
+  "version": "1.0.0",
+  "description": "ONE SHOT: THE ORACLE - A quantum puzzle game exploring the Deutsch-Jozsa algorithm for Quriosity Hackathon (Infinium 2026, ISAQC IIIT Hyderabad)",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lalithateju999-png/infinuim_quriosity.git"
+  },
+  "keywords": [
+    "quantum-computing",
+    "deutsch-jozsa",
+    "game",
+    "quriosity",
+    "infinium-2026",
+    "phase-kickback",
+    "interference"
+  ],
+  "author": "Quantum Game Dev Team",
+  "license": "MIT",
+  "dependencies": {
+    "canvas-confetti": "^1.9.4",
+    "lucide-react": "^1.51.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/canvas-confetti": "^1.9.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.2",
+    "vitest": "^4.1.11"
+  }
+}
