@@ -38,18 +38,23 @@ export const OutcomeModal: React.FC<OutcomeModalProps> = ({
     : (grover.getTargetProbability() * 100).toFixed(1);
 
   const measuredIdx = measurementResult ? measurementResult.measuredIndex + 1 : 1;
-  const targetIdx = engine.world.targetIndex + 1;
 
-  // Educational collapse explanation
+  // Educational insight — diegetic language that teaches timing through experience
   let collapseInsight = '';
   if (isSuccess) {
-    collapseInsight = `Measurement successfully collapsed the wave onto Target Spire ${targetIdx} with ${targetProb}% quantum amplitude clarity!`;
+    if (callsCount === opt) {
+      collapseInsight = `You called exactly ${callsCount} time${callsCount > 1 ? 's' : ''} — the echo was at its absolute strongest. Perfect timing: signal strength was ${targetProb}%.`;
+    } else if (callsCount < opt) {
+      collapseInsight = `Found Luma in ${callsCount} call${callsCount > 1 ? 's' : ''}, but the echo was still building (${targetProb}%). Calling ${opt} time${opt > 1 ? 's' : ''} gives the strongest signal.`;
+    } else {
+      collapseInsight = `Luma answered despite ${callsCount} calls — but the echo had already faded past its peak at ${opt}. The signal was ${targetProb}% and still weak. You were fortunate.`;
+    }
   } else if (isOxygenDepleted) {
-    collapseInsight = 'Life support depleted before amplitude resonance could be locked.';
+    collapseInsight = 'Oxygen ran out before you committed. Try fewer calls and listen when the echo bars glow brightest.';
   } else if (isOvershot) {
-    collapseInsight = `Destructive interference overshot the peak! Amplitude dispersed down to ${targetProb}%, and the wave collapsed onto Decoy Spire ${measuredIdx}.`;
+    collapseInsight = `You called ${callsCount} times but the echo peaked at ${opt} call${opt > 1 ? 's' : ''} then faded. Signal was only ${targetProb}% when you committed. Watch the echo bars — listen before they drop.`;
   } else {
-    collapseInsight = `Measured prematurely at ${targetProb}% clarity. The quantum superposition collapsed onto Decoy Spire ${measuredIdx} instead of Target Spire ${targetIdx}.`;
+    collapseInsight = `The echo was still faint at ${targetProb}% after ${callsCount} call${callsCount > 1 ? 's' : ''}. The signal peaks around ${opt} call${opt > 1 ? 's' : ''}. Call more before committing.`;
   }
 
   return (
@@ -75,23 +80,23 @@ export const OutcomeModal: React.FC<OutcomeModalProps> = ({
           <div>
             <h2 className="text-xl sm:text-2xl font-bold font-serif tracking-wide">
               {isSuccess
-                ? 'COMPANION LOCATED (STATE COLLAPSED)'
+                ? 'LUMA FOUND'
                 : isOxygenDepleted
                 ? 'OXYGEN DEPLETED'
-                : 'COLLAPSED ONTO DECOY SPIRE'}
+                : 'WRONG SPIRE — LUMA NOT HERE'}
             </h2>
             <p className="text-xs text-slate-400 font-mono mt-0.5">
-              {level.title} • {level.depthMeters}m Abyss
+              {level.subtitle} • {level.depthMeters}m
             </p>
           </div>
         </div>
 
         {/* Narrative Outcome */}
         <div className="text-xs sm:text-sm text-slate-300 italic text-center bg-slate-950/60 p-3.5 rounded-2xl border border-slate-800/60 leading-relaxed">
-          "{isSuccess ? level.narrativeSuccess : level.narrativeFailure}"
+          {isSuccess ? level.narrativeSuccess : level.narrativeFailure}
         </div>
 
-        {/* Quantum Collapse Educational Insight */}
+        {/* Echo Timing Feedback — teaches the player the Grover resonance curve */}
         <div
           className={`p-3.5 rounded-2xl border flex items-start gap-3 text-xs font-mono leading-relaxed ${
             isSuccess
@@ -102,7 +107,7 @@ export const OutcomeModal: React.FC<OutcomeModalProps> = ({
           <Info className={`w-4 h-4 shrink-0 mt-0.5 ${isSuccess ? 'text-cyan-400' : 'text-rose-400'}`} />
           <div>
             <span className="font-bold uppercase tracking-wider block mb-0.5">
-              {isSuccess ? 'Quantum Resonance Confirmed' : 'Quantum Dispersion Breakdown'}
+              {isSuccess ? 'Echo Timing' : 'What Went Wrong'}
             </span>
             <span>{collapseInsight}</span>
           </div>

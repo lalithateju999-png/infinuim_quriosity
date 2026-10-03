@@ -27,7 +27,7 @@ export const BriefingModal: React.FC<BriefingModalProps> = ({ level, onStartDive
 
         {/* Narrative Intro */}
         <div className="text-sm sm:text-base text-slate-300 leading-relaxed italic bg-slate-950/60 p-4 rounded-2xl border border-slate-800/50">
-          "{level.narrativeIntro}"
+          {level.narrativeIntro}
         </div>
 
         {/* Level Parameters Overview */}

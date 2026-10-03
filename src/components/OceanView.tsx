@@ -18,23 +18,28 @@ interface OceanViewProps {
 
 export const OceanView: React.FC<OceanViewProps> = ({ engine }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  // BUG 8 FIX: cache the offscreen mask canvas — never allocate inside the animation loop
+  const maskCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
     let animationFrameId: number;
     let lastTime = performance.now();
 
+    // Create the persistent offscreen mask canvas once
+    maskCanvasRef.current = document.createElement('canvas');
+
     const render = (currentTime: number) => {
       const dt = Math.min((currentTime - lastTime) / 1000, 0.1);
       lastTime = currentTime;
 
-      // Update engine physics, creatures, pulses and state
       engine.update(dt);
 
       const canvas = canvasRef.current;
-      if (canvas) {
+      const maskCanvas = maskCanvasRef.current;
+      if (canvas && maskCanvas) {
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          drawDarkOceanScene(ctx, canvas.width, canvas.height, engine);
+          drawDarkOceanScene(ctx, canvas.width, canvas.height, engine, maskCanvas);
         }
       }
 
@@ -47,6 +52,10 @@ export const OceanView: React.FC<OceanViewProps> = ({ engine }) => {
       if (canvasRef.current) {
         canvasRef.current.width = window.innerWidth;
         canvasRef.current.height = window.innerHeight;
+      }
+      if (maskCanvasRef.current) {
+        maskCanvasRef.current.width = window.innerWidth;
+        maskCanvasRef.current.height = window.innerHeight;
       }
     };
 
@@ -74,7 +83,8 @@ function drawDarkOceanScene(
   ctx: CanvasRenderingContext2D,
   viewWidth: number,
   viewHeight: number,
-  engine: GameEngine
+  engine: GameEngine,
+  maskCanvas: HTMLCanvasElement   // BUG 8 FIX: cached mask canvas passed from component
 ) {
   const { player, world, echoPulses, bubbles, level, pendingBlinks, status } = engine;
 
@@ -96,7 +106,7 @@ function drawDarkOceanScene(
   ctx.save();
   ctx.translate(-cameraX, -cameraY);
 
-  // 2. Distant Deep Silhouettes (Faint giant leviathans, ancient structures in deep fog)
+  // 2. Distant Deep Silhouettes
   drawDistantLayer(ctx, world, cameraX, cameraY, viewWidth, viewHeight);
 
   // 3. Environment: Caves, Rocks, Corals, Bioluminescent Plants
@@ -105,7 +115,7 @@ function drawDarkOceanScene(
   // 4. Candidate Locations (Natural geological spires/vents, NO debug primitives)
   drawGeologicalLocations(ctx, world.locations, cameraX, cameraY, viewWidth, viewHeight);
 
-  // 5. Marine Life (Jellyfish, Rays, Squids, Alien Fish, Glowing Fish, Alien Shrimp)
+  // 5. Marine Life
   drawSeaLife(ctx, world.creatures, cameraX, cameraY, viewWidth, viewHeight);
 
   // 6. Plankton & Marine Snow Particles
@@ -117,6 +127,7 @@ function drawDarkOceanScene(
   });
 
   // 8. Delayed Companion Bio-Blink (Brief glimpse 2-3s after CALL)
+  // BUG 9 FIX: pass cameraX/Y so the function can compute screen coords correctly
   drawCompanionBlinkGlimpse(ctx, pendingBlinks, cameraX, cameraY, viewWidth, viewHeight);
 
   // 9. Cavitation Bubbles
@@ -142,10 +153,10 @@ function drawDarkOceanScene(
   // Restore camera transform
   ctx.restore();
 
-  // 12. Dynamic Torch & Darkness Mask (Majority of ocean is dark; torch is main visibility)
-  drawTorchDarknessMask(ctx, viewWidth, viewHeight, player, cameraX, cameraY, echoPulses, pendingBlinks);
+  // 13. Dynamic Torch & Darkness Mask (uses cached maskCanvas — no allocation)
+  drawTorchDarknessMask(ctx, viewWidth, viewHeight, player, cameraX, cameraY, echoPulses, pendingBlinks, maskCanvas);
 
-  // 13. Cinematic Vignette
+  // 14. Cinematic Vignette
   drawCinematicVignette(ctx, viewWidth, viewHeight);
 
   ctx.restore();
@@ -862,7 +873,9 @@ function drawAcousticWave(ctx: CanvasRenderingContext2D, pulse: any) {
 
 /**
  * Delayed Companion Bio-Blink Glimpse (2-3s after CALL)
- * Does NOT stay visible. Blinks briefly, clarity scales with targetProbability.
+ * On-screen: golden halo + silhouette at Luma's exact position.
+ * Off-screen: loud multi-arc directional indicator at screen edge + animated arrow + distance text.
+ * Blink strength scales directly with REAL target probability.
  */
 function drawCompanionBlinkGlimpse(
   ctx: CanvasRenderingContext2D,
@@ -873,38 +886,42 @@ function drawCompanionBlinkGlimpse(
   h: number
 ) {
   pendingBlinks.forEach(blink => {
-    if (!blink.isBlinking) return; // Still waiting the 2-3s delay
+    if (!blink.isBlinking) return;
 
-    // Bell curve smooth fade-in and fade-out over blinkDuration
     const progress = Math.min(1.0, blink.blinkElapsed / blink.blinkDuration);
-    const envelope = Math.sin(progress * Math.PI); // 0 -> 1 -> 0
+    const envelope = Math.sin(progress * Math.PI); // 0 → 1 → 0 bell curve
     const prob = Math.max(0.08, Math.min(1.0, blink.targetProbability));
     const effectiveAlpha = envelope * (0.2 + prob * 0.75);
 
     const screenX = blink.x - camX;
     const screenY = blink.y - camY;
+    const margin = 60;
     const isOffScreen =
-      screenX < 50 || screenX > w - 50 || screenY < 50 || screenY > h - 50;
+      screenX < margin || screenX > w - margin || screenY < margin || screenY > h - margin;
 
     if (!isOffScreen) {
-      // On-Screen direct glimpse
-      const radius = 25 + prob * 65;
-
+      // === ON-SCREEN: golden halo + submarine silhouette ===
+      const radius = 28 + prob * 70;
       ctx.save();
       ctx.translate(blink.x, blink.y);
 
-      // Companion bio-resonance halo
-      const aura = ctx.createRadialGradient(0, 0, 2, 0, 0, radius);
+      const aura = ctx.createRadialGradient(0, 0, 3, 0, 0, radius);
       aura.addColorStop(0, `rgba(250, 204, 21, ${effectiveAlpha})`);
-      aura.addColorStop(0.5, `rgba(234, 179, 8, ${effectiveAlpha * 0.4})`);
+      aura.addColorStop(0.45, `rgba(234, 179, 8, ${effectiveAlpha * 0.45})`);
       aura.addColorStop(1, 'rgba(234, 179, 8, 0)');
       ctx.fillStyle = aura;
       ctx.beginPath();
       ctx.arc(0, 0, radius, 0, Math.PI * 2);
       ctx.fill();
 
-      // Faint submarine silhouette glimpse (only clear when probability is high)
-      if (prob > 0.25) {
+      // Second pulsing outer ring
+      ctx.beginPath();
+      ctx.arc(0, 0, radius * 1.3, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(250, 204, 21, ${effectiveAlpha * 0.25})`;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      if (prob > 0.2) {
         ctx.fillStyle = '#1c1917';
         ctx.strokeStyle = `rgba(250, 204, 21, ${effectiveAlpha * 0.9})`;
         ctx.lineWidth = 2;
@@ -921,34 +938,91 @@ function drawCompanionBlinkGlimpse(
 
       ctx.restore();
     } else {
-      // Off-Screen directional sonar ping arc on screen edge
+      // === OFF-SCREEN: prominent directional indicator at screen edge ===
+      // BUG 9 FIX: we're inside ctx.translate(-camX,-camY) world transform.
+      // We must reset to screen space before drawing screen-edge UI elements.
       const centerX = camX + w / 2;
       const centerY = camY + h / 2;
       const angle = Math.atan2(blink.y - centerY, blink.x - centerX);
 
-      // Position clamped to screen border
-      const edgePadding = 45;
-      const edgeWorldX = centerX + Math.cos(angle) * (w / 2 - edgePadding);
-      const edgeWorldY = centerY + Math.sin(angle) * (h / 2 - edgePadding);
+      // Clamp to screen edge with padding
+      const edgePad = 52;
+      const halfW = w / 2 - edgePad;
+      const halfH = h / 2 - edgePad;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      const scaleToEdge = Math.min(
+        Math.abs(halfW / (cos || 0.0001)),
+        Math.abs(halfH / (sin || 0.0001))
+      );
+      // Position in screen space (0,0 = top-left of viewport)
+      const edgeScreenX = w / 2 + cos * scaleToEdge;
+      const edgeScreenY = h / 2 + sin * scaleToEdge;
+
+      // Distance in world units (meters)
+      const lumaDist = Math.round(Math.hypot(blink.x - centerX, blink.y - centerY));
 
       ctx.save();
-      ctx.translate(edgeWorldX, edgeWorldY);
+      // Reset to screen space by undoing the world transform
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.translate(edgeScreenX, edgeScreenY);
       ctx.rotate(angle);
 
-      // Expanding directional echo wave arc
-      const waveRadius = 15 + envelope * 25;
-      ctx.strokeStyle = `rgba(250, 204, 21, ${effectiveAlpha * 0.9})`;
-      ctx.lineWidth = 2.5;
+      // --- Background glow blob ---
+      const glowR = 42 + envelope * 22;
+      const glowGrad = ctx.createRadialGradient(0, 0, 4, 0, 0, glowR);
+      glowGrad.addColorStop(0, `rgba(250, 204, 21, ${effectiveAlpha * 0.55})`);
+      glowGrad.addColorStop(1, 'rgba(250, 204, 21, 0)');
+      ctx.fillStyle = glowGrad;
       ctx.beginPath();
-      ctx.arc(0, 0, waveRadius, -Math.PI / 3, Math.PI / 3);
-      ctx.stroke();
+      ctx.arc(0, 0, glowR, 0, Math.PI * 2);
+      ctx.fill();
 
-      ctx.strokeStyle = `rgba(250, 204, 21, ${effectiveAlpha * 0.5})`;
-      ctx.lineWidth = 1.5;
+      // --- Three expanding concentric arcs pointing outward ---
+      const arcAngles = [Math.PI / 2.2, Math.PI / 3.2, Math.PI / 4.8];
+      arcAngles.forEach((span, idx) => {
+        const r = 18 + idx * 14 + envelope * 12;
+        ctx.beginPath();
+        ctx.arc(0, 0, r, -span / 2, span / 2);
+        ctx.strokeStyle = `rgba(250, 204, 21, ${effectiveAlpha * (0.9 - idx * 0.22)})`;
+        ctx.lineWidth = 3.5 - idx * 0.8;
+        ctx.stroke();
+      });
+
+      // --- Arrow head pointing toward Luma ---
+      const arrowLen = 16 + prob * 10;
+      const arrowW = 6 + prob * 4;
       ctx.beginPath();
-      ctx.arc(0, 0, waveRadius + 10, -Math.PI / 4, Math.PI / 4);
-      ctx.stroke();
+      ctx.moveTo(arrowLen + 14, 0);
+      ctx.lineTo(arrowLen + 14 - arrowW, -arrowW * 0.6);
+      ctx.lineTo(arrowLen + 14 - arrowW, arrowW * 0.6);
+      ctx.closePath();
+      ctx.fillStyle = `rgba(250, 204, 21, ${effectiveAlpha * 0.95})`;
+      ctx.fill();
 
+      ctx.restore();
+
+      // --- Distance label in screen space (unrotated) ---
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalAlpha = effectiveAlpha * 0.95;
+      ctx.font = `bold ${10 + Math.round(prob * 3)}px monospace`;
+      ctx.fillStyle = '#fef08a';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = 'rgba(0,0,0,0.8)';
+      ctx.shadowBlur = 6;
+      // Offset label inward from edge
+      const labelX = edgeScreenX - cos * 62;
+      const labelY = edgeScreenY - sin * 62;
+      ctx.fillText(`◈ ECHO ${lumaDist}m`, labelX, labelY);
+      // Tiny strength dot-scale indicator
+      const dotCount = Math.round(prob * 5);
+      const dotStr = '●'.repeat(dotCount) + '○'.repeat(5 - dotCount);
+      ctx.font = '8px monospace';
+      ctx.fillStyle = '#facc15';
+      ctx.shadowBlur = 3;
+      ctx.fillText(dotStr, labelX, labelY + 14);
       ctx.restore();
     }
   });
@@ -1135,6 +1209,7 @@ function drawBubbles(ctx: CanvasRenderingContext2D, bubbles: any[]) {
 /**
  * Torch & Ocean Darkness Mask
  * Cuts out torch cone and ambient halo to make the torch the primary source of visibility.
+ * BUG 8 FIX: uses a pre-allocated offscreen canvas from the component — no per-frame allocation.
  */
 function drawTorchDarknessMask(
   ctx: CanvasRenderingContext2D,
@@ -1144,7 +1219,8 @@ function drawTorchDarknessMask(
   cameraX: number,
   cameraY: number,
   echoPulses: any[],
-  pendingBlinks: any[]
+  pendingBlinks: any[],
+  tempCanvas: HTMLCanvasElement  // pre-allocated, passed from OceanView component
 ) {
   // Screen-space player position
   const screenPX = player.x - cameraX;
@@ -1152,14 +1228,15 @@ function drawTorchDarknessMask(
 
   ctx.save();
 
-  // Create an offscreen-like composite mask on screen canvas
-  // We use destination-out to erase darkness where light shines
-  const tempCanvas = document.createElement('canvas');
-  tempCanvas.width = viewWidth;
-  tempCanvas.height = viewHeight;
+  // Use the pre-allocated offscreen mask canvas (no allocation per frame)
+  // Resize only if dimensions changed (resize is cheap, avoids clearing valid pixels)
+  if (tempCanvas.width !== viewWidth) tempCanvas.width = viewWidth;
+  if (tempCanvas.height !== viewHeight) tempCanvas.height = viewHeight;
   const maskCtx = tempCanvas.getContext('2d');
 
   if (maskCtx) {
+    // Clear and redraw darkness each frame
+    maskCtx.clearRect(0, 0, viewWidth, viewHeight);
     // Fill darkness (softened to ~77% so ocean has subtle atmospheric ambient light)
     maskCtx.fillStyle = 'rgba(1, 6, 14, 0.77)';
     maskCtx.fillRect(0, 0, viewWidth, viewHeight);
@@ -1300,7 +1377,7 @@ function drawQuantumCollapseSequence(
   ctx.arc(0, 0, pulseRadius, 0, Math.PI * 2);
   ctx.stroke();
 
-  // Quantum measurement reticle
+  // Reticle crosshair
   ctx.beginPath();
   ctx.moveTo(-pulseRadius - 12, 0);
   ctx.lineTo(pulseRadius + 12, 0);
@@ -1308,15 +1385,16 @@ function drawQuantumCollapseSequence(
   ctx.lineTo(0, pulseRadius + 12);
   ctx.stroke();
 
+  // BUG 11 FIX: set textBaseline so text renders at the correct vertical position
+  ctx.textBaseline = 'middle';
   ctx.font = 'bold 12px "JetBrains Mono", monospace';
+  // BUG 10 FIX: diegetic language — no quantum jargon during gameplay
   ctx.fillStyle = isTarget ? '#fef08a' : '#fda4af';
   ctx.textAlign = 'center';
   ctx.fillText(
-    isTarget
-      ? 'STATE COLLAPSED: TARGET LOCKED'
-      : `COLLAPSED: DECOY SPIRE (${(result.targetProbability * 100).toFixed(0)}% AMPLITUDE)`,
+    isTarget ? '◈ LUMA FOUND' : `◈ WRONG SPIRE — signal: ${(result.targetProbability * 100).toFixed(0)}%`,
     0,
-    -pulseRadius - 18
+    -pulseRadius - 20
   );
 
   ctx.restore();
@@ -1327,15 +1405,19 @@ function drawQuantumCollapseSequence(
     ctx.save();
     ctx.translate(trueTarget.x, trueTarget.y);
     ctx.strokeStyle = 'rgba(56, 189, 248, 0.5)';
+    // BUG 12 FIX: set dashes inside save/restore; reset explicitly before restore so they don't leak
     ctx.setLineDash([5, 5]);
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(0, 0, 48, 0, Math.PI * 2);
     ctx.stroke();
+    // BUG 10 FIX: diegetic label instead of "TARGET PHASE LOCATION"
+    ctx.setLineDash([]); // reset line dash before drawing text
+    ctx.textBaseline = 'middle'; // BUG 11 FIX
     ctx.font = '10px monospace';
     ctx.fillStyle = 'rgba(56, 189, 248, 0.8)';
     ctx.textAlign = 'center';
-    ctx.fillText('TARGET PHASE LOCATION', 0, -56);
+    ctx.fillText('LUMA IS HERE', 0, -58);
     ctx.restore();
   }
 }

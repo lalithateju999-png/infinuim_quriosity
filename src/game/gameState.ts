@@ -80,6 +80,9 @@ export class GameEngine {
   measurementResult: MeasurementResult | null = null;
   companionRescueAnimation: number = 0; // 0 to 1 progress on success
 
+  // Per-call target probability history (drives the resonance history display)
+  signalHistory: number[] = [];
+
   // Input keys
   keys: { [key: string]: boolean } = {};
 
@@ -127,6 +130,7 @@ export class GameEngine {
     this.callsCount = 0;
     this.measurementResult = null;
     this.companionRescueAnimation = 0;
+    this.signalHistory = [];
     this.status = 'briefing';
     this.notify();
   }
@@ -140,11 +144,16 @@ export class GameEngine {
   /**
    * Action: CALL
    * Real Grover iteration → expanding acoustic ripple → environmental reaction →
-   * wait ~2.4s → brief companion glimpse fades in & out.
+   * wait ~2.3s → brief companion glimpse fades in & out.
    */
   public call(): boolean {
     if (this.status !== 'exploring') return false;
-    if (this.player.oxygen <= 0) return false;
+    // BUG 5 FIX: check oxygen BEFORE deducting — prevents running Grover step on an already-dead run
+    if (this.player.oxygen <= 0) {
+      this.status = 'failure';
+      this.notify();
+      return false;
+    }
 
     // 1. Deduct oxygen cost
     this.player.oxygen = Math.max(0, this.player.oxygen - this.level.callOxygenCost);
@@ -156,6 +165,9 @@ export class GameEngine {
     const opt = this.grover.optimalIterations;
     const isPeak = this.grover.iterations === opt;
     const isOvershot = this.grover.iterations > opt;
+
+    // Record real probability for resonance history display
+    this.signalHistory.push(targetProb);
 
     // 3. Play dynamic Web Audio sonar ping derived from real quantum probability
     sound.playEchoPulse(targetProb, isPeak, isOvershot);
@@ -173,7 +185,7 @@ export class GameEngine {
       originY: this.player.y,
       radius: 12,
       maxRadius: 2200,
-      speed: 520, // expanding wavefront
+      speed: 520,
       alpha: 1.0,
       color: pulseColor,
       targetProbability: targetProb,
@@ -184,12 +196,12 @@ export class GameEngine {
     this.triggerEnvironmentalPulseReaction();
 
     // 6. Schedule delayed companion blink: wait ~2.3 seconds before glimpse appears
+    // BUG 7 FIX: only allow 1 pending blink at a time — prevents golden pulse stacking from rapid CALL presses
     const targetLoc = this.world.locations[this.world.targetIndex];
-    if (targetLoc) {
-      // Duration scales with probability: 0.8s (faint glimpse) to 1.6s (peak clarity)
+    if (targetLoc && this.pendingBlinks.length === 0) {
       const blinkDuration = 0.8 + Math.min(1, targetProb) * 0.8;
       this.pendingBlinks.push({
-        delayTimer: 2.3, // ~2.3 seconds delay
+        delayTimer: 2.3,
         isBlinking: false,
         blinkDuration,
         blinkElapsed: 0,
@@ -199,6 +211,7 @@ export class GameEngine {
       });
     }
 
+    // Check oxygen depletion after this call
     if (this.player.oxygen <= 0) {
       this.status = 'failure';
     }
@@ -248,10 +261,14 @@ export class GameEngine {
   /**
    * Action: LISTEN
    * Quantum measurement according to statevector probabilities!
+   * BUG 4 FIX: guarded against double-invocation via status check — status switches to
+   * 'listening_sequence' immediately so a second call() or listen() before setTimeout
+   * resolves is rejected by the status guard at the top.
    */
   public listen(): MeasurementResult | null {
     if (this.status !== 'exploring') return null;
 
+    // Immediately lock status so no second call can slip through
     this.status = 'listening_sequence';
     this.notify();
 
@@ -515,9 +532,11 @@ export class GameEngine {
         c.angle = Math.atan2(c.vy, c.vx);
       }
 
-      // Gentle boundary bounce
-      if (c.x < 120 || c.x > this.world.width - 120) c.vx *= -1;
-      if (c.y < 120 || c.y > this.world.height - 120) c.vy *= -1;
+      // BUG 6 FIX: clamp position AND flip velocity so creatures never jitter outside the wall
+      if (c.x < 120) { c.x = 120; c.vx = Math.abs(c.vx); }
+      if (c.x > this.world.width - 120) { c.x = this.world.width - 120; c.vx = -Math.abs(c.vx); }
+      if (c.y < 120) { c.y = 120; c.vy = Math.abs(c.vy); }
+      if (c.y > this.world.height - 120) { c.y = this.world.height - 120; c.vy = -Math.abs(c.vy); }
     });
   }
 

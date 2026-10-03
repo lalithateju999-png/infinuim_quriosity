@@ -19,7 +19,7 @@ export const HUD: React.FC<HUDProps> = ({
   onToggleMute,
   isMuted,
 }) => {
-  const { player, level, status, callsCount, world } = engine;
+  const { player, level, status, callsCount, world, signalHistory, grover } = engine;
   const oxygenPct = Math.max(0, Math.min(100, (player.oxygen / player.maxOxygen) * 100));
   const isOxygenLow = oxygenPct < 25;
 
@@ -29,22 +29,47 @@ export const HUD: React.FC<HUDProps> = ({
   const angleToSearch = Math.atan2(dy, dx);
   const distToSearch = Math.round(Math.hypot(dx, dy));
 
+  // Latest signal strength from real quantum probability (0–1)
+  const latestProb = signalHistory.length > 0 ? signalHistory[signalHistory.length - 1] : 0;
+  const opt = grover.optimalIterations;
+  const isOvershot = grover.iterations > opt;
+  const isPeak = grover.iterations === opt;
+
+  // Diegetic echo strength description (no quantum terminology)
+  const echoLabel = (() => {
+    if (callsCount === 0) return 'LISTENING FOR ECHOES…';
+    if (isPeak) return 'SIGNAL AT PEAK — LISTEN NOW';
+    if (isOvershot) return 'ECHO FADING — SCATTERED';
+    if (latestProb > 0.6) return 'STRONG ECHO DETECTED';
+    if (latestProb > 0.3) return 'ECHO GROWING…';
+    return 'FAINT ECHO…';
+  })();
+
+  // Colour for label based on state
+  const echoLabelColor = isPeak
+    ? 'text-amber-300'
+    : isOvershot
+    ? 'text-rose-400'
+    : latestProb > 0.3
+    ? 'text-cyan-300'
+    : 'text-slate-400';
+
   return (
     <div className="absolute inset-0 pointer-events-none flex flex-col justify-between p-4 sm:p-6 select-none font-sans text-slate-100">
-      {/* Top Bar: Chapter, Directional Compass & Oxygen */}
+      {/* Top Bar */}
       <div className="flex items-start justify-between gap-4">
-        {/* Left: Chapter / Depth */}
+        {/* Left: Chapter / Depth — no "SUPERPOSITION" in the title shown here */}
         <div className="flex flex-col gap-1 bg-slate-950/80 backdrop-blur-md border border-cyan-950/60 px-4 py-2.5 rounded-xl shadow-2xl pointer-events-auto">
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
             <h1 className="text-xs sm:text-sm font-bold tracking-wider text-cyan-300 font-mono">
-              {level.title}
+              ECHOES — {level.subtitle}
             </h1>
           </div>
           <div className="flex items-center gap-3 text-[11px] text-slate-400 font-mono">
             <span>DEPTH: <strong className="text-slate-200">{level.depthMeters}m</strong></span>
             <span>•</span>
-            <span>CANDIDATES: <strong className="text-slate-200">{level.n} Spires</strong></span>
+            <span>CANDIDATE SPIRES: <strong className="text-slate-200">{level.n}</strong></span>
             <span>•</span>
             <button
               onClick={onOpenLevelSelect}
@@ -55,7 +80,7 @@ export const HUD: React.FC<HUDProps> = ({
           </div>
         </div>
 
-        {/* Center: Directional Sonar Compass */}
+        {/* Center: Directional Compass (distance only, no quantum terms) */}
         <div className="hidden sm:flex items-center gap-2.5 bg-slate-950/80 backdrop-blur-md border border-slate-800 px-4 py-2 rounded-xl text-xs font-mono text-slate-300 pointer-events-auto shadow-xl">
           <div
             className="w-4 h-4 flex items-center justify-center transition-transform duration-200"
@@ -63,12 +88,11 @@ export const HUD: React.FC<HUDProps> = ({
           >
             <Navigation className="w-3.5 h-3.5 text-cyan-400 fill-cyan-400/40" />
           </div>
-          <span>SPIRES SECTOR: <strong className="text-cyan-300">{distToSearch}m</strong></span>
+          <span>SPIRES: <strong className="text-cyan-300">{distToSearch}m</strong></span>
         </div>
 
-        {/* Right: Oxygen Gauge & Sound Mute */}
+        {/* Right: Oxygen + Mute */}
         <div className="flex items-center gap-3 pointer-events-auto">
-          {/* Oxygen Monitor */}
           <div
             className={`flex flex-col min-w-[140px] sm:min-w-[180px] bg-slate-950/80 backdrop-blur-md border px-3.5 py-2 rounded-xl shadow-2xl transition-all ${
               isOxygenLow
@@ -97,7 +121,6 @@ export const HUD: React.FC<HUDProps> = ({
             </div>
           </div>
 
-          {/* Audio Mute Button */}
           <button
             onClick={onToggleMute}
             className="p-2.5 rounded-xl bg-slate-950/80 backdrop-blur-md border border-slate-800 hover:border-cyan-700/60 text-slate-400 hover:text-cyan-300 transition-all cursor-pointer shadow-lg"
@@ -108,38 +131,72 @@ export const HUD: React.FC<HUDProps> = ({
         </div>
       </div>
 
-      {/* Bottom Center: Signal Feedback & Action Controls */}
+      {/* Bottom: Echo Strength History + Controls */}
       <div className="flex flex-col items-center gap-3 pb-2">
-        {/* Diegetic Hydrophone Acoustic Activity Feedback */}
-        <div className="bg-slate-950/80 backdrop-blur-md border border-slate-800/80 px-4 py-2 rounded-2xl flex items-center gap-3.5 shadow-2xl pointer-events-auto">
-          <div className="flex items-center gap-2 text-xs font-mono">
-            <Radio className="w-3.5 h-3.5 text-cyan-400" />
-            <span className="text-slate-400">HYDROPHONE:</span>
+
+        {/* === Resonance Echo Strength History Chart === */}
+        {/* Shows the real target probability after each CALL as growing/shrinking bars.
+            Player learns to see the curve rise, peak, then fall — core Grover intuition. */}
+        <div className="bg-slate-950/85 backdrop-blur-md border border-slate-800/80 px-4 py-2.5 rounded-2xl flex flex-col items-center gap-1.5 shadow-2xl pointer-events-auto min-w-[260px]">
+          <div className="flex items-center justify-between w-full">
+            <div className="flex items-center gap-2 text-xs font-mono">
+              <Radio className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="text-slate-400">ECHO STRENGTH</span>
+            </div>
+            <span className={`text-[11px] font-mono font-semibold ${echoLabelColor}`}>
+              {echoLabel}
+            </span>
           </div>
 
-          {/* Dynamic 7-bar ambient wave indicator */}
-          <div className="flex items-center gap-1 h-4">
-            {Array.from({ length: 7 }).map((_, i) => {
-              const pulse = 0.4 + 0.6 * Math.sin(performance.now() * 0.004 + i * 0.8);
-              const height = Math.min(16, Math.max(3, pulse * (callsCount > 0 ? 14 : 6)));
+          {/* Bar chart: each bar = one CALL, height = real target probability */}
+          <div className="flex items-end gap-[3px] h-8 w-full justify-center">
+            {/* Show up to 12 calls; empty slots are ghosted */}
+            {Array.from({ length: Math.max(8, signalHistory.length + 1) }).map((_, i) => {
+              if (i >= signalHistory.length) {
+                // Future empty slot
+                return (
+                  <div
+                    key={i}
+                    className="flex-1 max-w-[14px] rounded-sm bg-slate-800/50"
+                    style={{ height: '4px' }}
+                  />
+                );
+              }
+              const prob = signalHistory[i];
+              const isThisPeak = i + 1 === opt;
+              const isThisOvershot = i + 1 > opt;
+              const barH = Math.max(4, Math.round(prob * 32)); // max 32px
+              const barColor = isThisPeak
+                ? '#facc15' // gold for the real peak
+                : isThisOvershot
+                ? '#f43f5e' // red after overshoot
+                : `hsl(${185 + prob * 50}, 80%, ${45 + prob * 30}%)`; // cyan → teal gradient
               return (
                 <div
                   key={i}
-                  className="w-1 rounded-full transition-all duration-200 bg-cyan-400/80"
-                  style={{ height: `${height}px` }}
+                  className="flex-1 max-w-[14px] rounded-sm transition-all duration-300"
+                  style={{
+                    height: `${barH}px`,
+                    backgroundColor: barColor,
+                    boxShadow: isThisPeak ? `0 0 6px 1px #facc15aa` : isThisOvershot ? 'none' : `0 0 4px ${barColor}88`,
+                  }}
+                  title={`Call ${i + 1}: ${(prob * 100).toFixed(1)}%`}
                 />
               );
             })}
           </div>
 
-          <div className="text-[11px] font-mono font-medium text-slate-300">
-            {callsCount === 0 ? 'DIFFUSE SUPERPOSITION (0 PULSES)' : `AMPLIFYING (${callsCount} ${callsCount === 1 ? 'PULSE' : 'PULSES'})`}
-          </div>
+          {/* Axis labels: faint and minimal */}
+          {signalHistory.length > 0 && (
+            <div className="flex items-center justify-between w-full text-[9px] font-mono text-slate-600">
+              <span>CALL 1</span>
+              {signalHistory.length > 1 && <span>CALL {signalHistory.length}</span>}
+            </div>
+          )}
         </div>
 
-        {/* Primary Controls: CALL and LISTEN */}
+        {/* Primary Controls */}
         <div className="flex items-center gap-3.5 pointer-events-auto">
-          {/* CALL BUTTON */}
           <button
             onClick={onCall}
             disabled={status !== 'exploring' || player.oxygen <= 0}
@@ -156,7 +213,6 @@ export const HUD: React.FC<HUDProps> = ({
             </div>
           </button>
 
-          {/* LISTEN / COMMIT BUTTON */}
           <button
             onClick={onListen}
             disabled={status !== 'exploring'}
@@ -167,14 +223,14 @@ export const HUD: React.FC<HUDProps> = ({
             </div>
             <div className="flex flex-col items-start text-left">
               <span className="font-mono text-xs uppercase tracking-widest text-indigo-300">LISTEN</span>
-              <span className="text-[10px] text-slate-400 font-mono font-normal">[E] • COMMIT & MEASURE</span>
+              <span className="text-[10px] text-slate-400 font-mono font-normal">[E] • COMMIT & DIVE</span>
             </div>
           </button>
         </div>
 
-        {/* Navigation & Learning Hint */}
-        <div className="text-[10px] text-slate-400 font-mono bg-slate-950/40 px-3 py-0.5 rounded-full border border-slate-800/30">
-          Follow Compass to Spire Sector • [SPACE] to pulse • [E] at Peak Harmony to Measure
+        {/* Minimal diegetic hint */}
+        <div className="text-[10px] text-slate-500 font-mono bg-slate-950/40 px-3 py-0.5 rounded-full border border-slate-800/30">
+          Swim toward the spires • [SPACE] to pulse • LISTEN when the echo peaks
         </div>
       </div>
     </div>

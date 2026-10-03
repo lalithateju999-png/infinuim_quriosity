@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { GameEngine } from './gameState';
 import { CAMPAIGN_LEVELS, LevelConfig } from './levels';
 import { OceanView } from '../components/OceanView';
@@ -17,22 +17,24 @@ export const Game: React.FC = () => {
   const [isMuted, setIsMuted] = useState<boolean>(sound.getIsMuted());
   const [, setRenderTrigger] = useState<number>(0);
 
-  // Initialize GameEngine instance
-  const engine = useMemo(() => {
-    return new GameEngine(currentLevel);
-  }, [currentLevel]);
+  // BUG 2 FIX: Engine held in a stable ref — never recreated by React.
+  // setLevel() is always used to switch levels without breaking the ref.
+  const engineRef = useRef<GameEngine>(new GameEngine(CAMPAIGN_LEVELS[0]));
+  const engine = engineRef.current;
 
   // Hook engine state change to React updates
   useEffect(() => {
     engine.onStateChange = () => {
       setRenderTrigger(prev => prev + 1);
     };
+    return () => {
+      engine.onStateChange = undefined;
+    };
   }, [engine]);
 
   // Keyboard controls listener
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore key events if typing or in modal that isn't game
       if (isReplayOpen || isLevelSelectOpen) return;
 
       if (e.code === 'Space') {
@@ -77,11 +79,13 @@ export const Game: React.FC = () => {
     engine.listen();
   }, [engine]);
 
+  // BUG 3 FIX: Clamp to last level instead of wrapping, show campaign complete state
   const handleNextLevel = useCallback(() => {
-    const nextIdx = (levelIndex + 1) % CAMPAIGN_LEVELS.length;
+    const nextIdx = Math.min(levelIndex + 1, CAMPAIGN_LEVELS.length - 1);
+    const nextLevel = CAMPAIGN_LEVELS[nextIdx];
     setLevelIndex(nextIdx);
-    setCurrentLevel(CAMPAIGN_LEVELS[nextIdx]);
-    engine.setLevel(CAMPAIGN_LEVELS[nextIdx]);
+    setCurrentLevel(nextLevel);
+    engine.setLevel(nextLevel);
   }, [levelIndex, engine]);
 
   const handleRetry = useCallback(() => {
@@ -89,6 +93,8 @@ export const Game: React.FC = () => {
   }, [engine, currentLevel]);
 
   const handleSelectLevel = useCallback((lvl: LevelConfig) => {
+    const idx = CAMPAIGN_LEVELS.findIndex(l => l.id === lvl.id);
+    if (idx !== -1) setLevelIndex(idx);
     setCurrentLevel(lvl);
     engine.setLevel(lvl);
     setIsLevelSelectOpen(false);
@@ -99,12 +105,12 @@ export const Game: React.FC = () => {
     setIsMuted(muted);
   }, []);
 
+  const isLastLevel = levelIndex >= CAMPAIGN_LEVELS.length - 1;
+
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-[#01040a]">
-      {/* Real-time HTML5 Canvas Ocean Renderer */}
       <OceanView engine={engine} />
 
-      {/* Main Underwater Exploration HUD */}
       <HUD
         engine={engine}
         onOpenLevelSelect={() => setIsLevelSelectOpen(true)}
@@ -114,27 +120,24 @@ export const Game: React.FC = () => {
         isMuted={isMuted}
       />
 
-      {/* Level Briefing Modal */}
       {engine.status === 'briefing' && (
         <BriefingModal level={engine.level} onStartDive={handleStartDive} />
       )}
 
-      {/* Outcome / Measurement Collapse Modal */}
       {(engine.status === 'success' || engine.status === 'failure') && (
         <OutcomeModal
           engine={engine}
           onNextLevel={handleNextLevel}
           onRetry={handleRetry}
           onOpenReplay={() => setIsReplayOpen(true)}
+          isLastLevel={isLastLevel}
         />
       )}
 
-      {/* Quantum Replay / Echo Analysis Debrief */}
       {isReplayOpen && (
         <QuantumReplay engine={engine} onClose={() => setIsReplayOpen(false)} />
       )}
 
-      {/* Level / Sector Select Modal */}
       {isLevelSelectOpen && (
         <LevelSelectModal
           currentLevelId={currentLevel.id}
