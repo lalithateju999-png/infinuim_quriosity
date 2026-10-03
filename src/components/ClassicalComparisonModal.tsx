@@ -91,7 +91,7 @@ export const ClassicalComparisonModal: React.FC<ClassicalComparisonModalProps> =
             <span className="text-slate-400">If you measure in superposition, the wave collapses to a single random answer, telling you no more than 1 classical query!</span>
           </p>
           <p>
-            ✓ <span className="text-emerald-300 font-semibold">The True Physics:</span> The quantum probe uses <strong>Phase Kickback</strong> to encode the function into wave interference. The final Hadamard transformation collides these waves so that <strong>global parity</strong> is extracted directly into measurement without ever reading individual answers!
+            ✓ <span className="text-emerald-300 font-semibold">The True Physics:</span> The quantum probe uses <strong>Phase Kickback</strong> to encode the function into relative wave phases. The final Hadamard transformation collides these waves so that the global distinction (<strong>Constant vs Balanced</strong>) is extracted directly into measurement without ever reading individual answers!
           </p>
         </div>
 

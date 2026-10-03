@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { C } from './complex';
 import { StateVector } from './stateVector';
 import { Gates, applySingleQubitGate } from './gates';
-import { PredefinedOracles, applyQuantumOracle, analyzeOracleKind } from './oracle';
+import { PredefinedOracles, applyQuantumOracle, analyzeOracleKind, OracleDefinition } from './oracle';
 import { runDeutschJozsaSimulation } from './deutschJozsa';
 
 describe('Complex Arithmetic', () => {
@@ -14,7 +14,6 @@ describe('Complex Arithmetic', () => {
     expect(sum.im).toBe(-2);
 
     const prod = C.mul(a, b);
-    // (1+2i)(3-4i) = 3 - 4i + 6i - 8i^2 = 11 + 2i
     expect(prod.re).toBe(11);
     expect(prod.im).toBe(2);
   });
@@ -62,87 +61,142 @@ describe('Single Qubit Gates & Superposition', () => {
 
 describe('Phase Kickback Mechanism', () => {
   it('Phase kickback flips phase by 180° when target is in |-> and f(x)=1', () => {
-    // 2-qubit state: input |1> (x=1), target |-> = 1/√2 |0> - 1/√2 |1>
-    // State is |1> ⊗ |-> = 1/√2 |10> - 1/√2 |11>
     const inputQubit = StateVector.fromBasis(1, 1); // |1>
     const targetQubit = applySingleQubitGate(StateVector.fromBasis(1, 1), 0, Gates.H); // |->
     const jointState = inputQubit.tensor(targetQubit);
 
-    // Oracle f(x) = 1 (constant 1)
     const oracleConst1 = PredefinedOracles['1q-const-1'];
     const afterOracle = applyQuantumOracle(jointState, oracleConst1.fn, 1);
 
-    // Original jointState: amps = [0, 0, +1/√2, -1/√2]
-    // After oracle with f(1)=1: |1,0> -> |1,1> and |1,1> -> |1,0>
-    // Result amps: [0, 0, -1/√2, +1/√2] = -1 * (|1> ⊗ |->)
     expect(afterOracle.amplitudes[2].re).toBeCloseTo(-1 / Math.SQRT2, 5);
     expect(afterOracle.amplitudes[3].re).toBeCloseTo(1 / Math.SQRT2, 5);
   });
 });
 
-describe('Deutsch-Jozsa Algorithm Rigorous Verification', () => {
-  it('classifies all 1-qubit Constant and Balanced oracles accurately in 1 shot', () => {
-    for (const oracleId of ['1q-const-0', '1q-const-1', '1q-bal-identity', '1q-bal-not']) {
-      const oracle = PredefinedOracles[oracleId];
-      const result = runDeutschJozsaSimulation(oracle);
-
-      if (oracle.kind === 'constant') {
-        expect(result.finalMeasurement.isAllZeros).toBe(true);
-        expect(result.finalMeasurement.probabilities['0']).toBeCloseTo(1.0, 5);
-        expect(result.finalMeasurement.probabilities['1']).toBeCloseTo(0.0, 5);
-        expect(result.finalMeasurement.predictedKind).toBe('constant');
-      } else {
-        expect(result.finalMeasurement.isAllZeros).toBe(false);
-        expect(result.finalMeasurement.probabilities['0']).toBeCloseTo(0.0, 5);
-        expect(result.finalMeasurement.probabilities['1']).toBeCloseTo(1.0, 5);
-        expect(result.finalMeasurement.predictedKind).toBe('balanced');
-      }
-      expect(result.finalMeasurement.isCorrect).toBe(true);
-    }
-  });
-
-  it('classifies all 2-qubit Constant and Balanced oracles accurately in 1 shot', () => {
-    const twoQubitOracles = [
-      '2q-const-0',
-      '2q-const-1',
-      '2q-bal-xor',
-      '2q-bal-xnor',
-      '2q-bal-bit0',
-      '2q-bal-bit1'
+describe('Deutsch-Jozsa Exhaustive & Randomized Mathematical Proof', () => {
+  it('exhaustively validates ALL 1-qubit boolean functions (2 constant, 2 balanced)', () => {
+    // 1-qubit functions have 2^2 = 4 combinations: [0,0], [1,1], [0,1], [1,0]
+    const combinations: [number, number][] = [
+      [0, 0], [1, 1], [0, 1], [1, 0]
     ];
 
-    for (const oracleId of twoQubitOracles) {
-      const oracle = PredefinedOracles[oracleId];
-      const result = runDeutschJozsaSimulation(oracle);
+    for (const [f0, f1] of combinations) {
+      const isConst = f0 === f1;
+      const oracle: OracleDefinition = {
+        id: `test-1q-${f0}-${f1}`,
+        name: `f(${f0},${f1})`,
+        description: 'Test oracle',
+        numInputQubits: 1,
+        kind: isConst ? 'constant' : 'balanced',
+        fn: (x: number) => (x === 0 ? f0 : f1) as 0 | 1,
+        truthTable: { '0': f0 as 0 | 1, '1': f1 as 0 | 1 }
+      };
 
-      if (oracle.kind === 'constant') {
-        expect(result.finalMeasurement.isAllZeros).toBe(true);
-        expect(result.finalMeasurement.probabilities['00']).toBeCloseTo(1.0, 5);
-        expect(result.finalMeasurement.predictedKind).toBe('constant');
+      const res = runDeutschJozsaSimulation(oracle);
+      if (isConst) {
+        expect(res.finalMeasurement.probabilities['0']).toBeCloseTo(1.0, 5);
+        expect(res.finalMeasurement.probabilities['1']).toBeCloseTo(0.0, 5);
+        expect(res.finalMeasurement.predictedKind).toBe('constant');
       } else {
-        expect(result.finalMeasurement.isAllZeros).toBe(false);
-        expect(result.finalMeasurement.probabilities['00']).toBeCloseTo(0.0, 5);
-        expect(result.finalMeasurement.predictedKind).toBe('balanced');
+        expect(res.finalMeasurement.probabilities['0']).toBeCloseTo(0.0, 5);
+        expect(res.finalMeasurement.probabilities['1']).toBeCloseTo(1.0, 5);
+        expect(res.finalMeasurement.predictedKind).toBe('balanced');
       }
-      expect(result.finalMeasurement.isCorrect).toBe(true);
     }
   });
 
-  it('classifies 3-qubit Oracles accurately in 1 shot', () => {
-    const threeQubitOracles = ['3q-const-0', '3q-bal-parity3'];
+  it('exhaustively validates ALL 16 possible 2-qubit boolean functions for constant and balanced cases', () => {
+    // 2-qubit has 4 inputs: 00, 01, 10, 11 -> 2^4 = 16 functions
+    for (let mask = 0; mask < 16; mask++) {
+      const table: Record<string, 0 | 1> = {
+        '00': ((mask >> 3) & 1) as 0 | 1,
+        '01': ((mask >> 2) & 1) as 0 | 1,
+        '10': ((mask >> 1) & 1) as 0 | 1,
+        '11': (mask & 1) as 0 | 1,
+      };
 
-    for (const oracleId of threeQubitOracles) {
-      const oracle = PredefinedOracles[oracleId];
-      const result = runDeutschJozsaSimulation(oracle);
+      const kind = analyzeOracleKind(table);
+      if (kind === 'invalid') continue; // only test promised constant or balanced functions
 
-      if (oracle.kind === 'constant') {
-        expect(result.finalMeasurement.isAllZeros).toBe(true);
-        expect(result.finalMeasurement.probabilities['000']).toBeCloseTo(1.0, 5);
+      const oracle: OracleDefinition = {
+        id: `test-2q-${mask}`,
+        name: `2Q Oracle ${mask}`,
+        description: 'Exhaustive test',
+        numInputQubits: 2,
+        kind,
+        fn: (x: number) => {
+          const bitStr = x.toString(2).padStart(2, '0');
+          return table[bitStr];
+        },
+        truthTable: table
+      };
+
+      const res = runDeutschJozsaSimulation(oracle);
+
+      if (kind === 'constant') {
+        expect(res.finalMeasurement.probabilities['00']).toBeCloseTo(1.0, 5);
+        expect(res.finalMeasurement.isAllZeros).toBe(true);
+        expect(res.finalMeasurement.predictedKind).toBe('constant');
       } else {
-        expect(result.finalMeasurement.isAllZeros).toBe(false);
-        expect(result.finalMeasurement.probabilities['000']).toBeCloseTo(0.0, 5);
+        // Balanced: MUST strictly have P(00) = 0
+        expect(res.finalMeasurement.probabilities['00']).toBeCloseTo(0.0, 5);
+        expect(res.finalMeasurement.isAllZeros).toBe(false);
+        expect(res.finalMeasurement.predictedKind).toBe('balanced');
       }
-      expect(result.finalMeasurement.isCorrect).toBe(true);
+    }
+  });
+
+  it('validates multiple 3-qubit Constant and Balanced permutations (8 inputs)', () => {
+    // Constant 0 and Constant 1
+    for (const constVal of [0, 1]) {
+      const oracle: OracleDefinition = {
+        id: `test-3q-const-${constVal}`,
+        name: `3Q Constant ${constVal}`,
+        description: '3Q Constant',
+        numInputQubits: 3,
+        kind: 'constant',
+        fn: () => constVal as 0 | 1,
+        truthTable: Object.fromEntries(
+          Array.from({ length: 8 }, (_, i) => [i.toString(2).padStart(3, '0'), constVal as 0 | 1])
+        )
+      };
+      const res = runDeutschJozsaSimulation(oracle);
+      expect(res.finalMeasurement.probabilities['000']).toBeCloseTo(1.0, 5);
+      expect(res.finalMeasurement.predictedKind).toBe('constant');
+    }
+
+    // Balanced: 10 different random balanced permutations (4 zeros, 4 ones)
+    for (let testRound = 0; testRound < 10; testRound++) {
+      const arr: (0 | 1)[] = [0, 0, 0, 0, 1, 1, 1, 1];
+      // shuffle
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+
+      const table: Record<string, 0 | 1> = {};
+      for (let i = 0; i < 8; i++) {
+        table[i.toString(2).padStart(3, '0')] = arr[i];
+      }
+
+      const oracle: OracleDefinition = {
+        id: `test-3q-bal-rand-${testRound}`,
+        name: `3Q Balanced Random ${testRound}`,
+        description: 'Random 3Q Balanced',
+        numInputQubits: 3,
+        kind: 'balanced',
+        fn: (x: number) => {
+          const bitStr = x.toString(2).padStart(3, '0');
+          return table[bitStr];
+        },
+        truthTable: table
+      };
+
+      const res = runDeutschJozsaSimulation(oracle);
+      // Probability of |000> MUST BE ZERO
+      expect(res.finalMeasurement.probabilities['000']).toBeCloseTo(0.0, 5);
+      expect(res.finalMeasurement.isAllZeros).toBe(false);
+      expect(res.finalMeasurement.predictedKind).toBe('balanced');
     }
   });
 });

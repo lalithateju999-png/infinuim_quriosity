@@ -212,7 +212,7 @@ export const Level2OracleIntro: React.FC<Level2Props> = ({ onCompleteLevel }) =>
             <div className="p-3 bg-cyan-950/40 border border-cyan-800/50 rounded-lg text-xs text-cyan-200 flex items-start gap-2">
               <HelpCircle className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
               <div>
-                <strong className="text-cyan-300">The Quantum Solution:</strong> A quantum computer doesn't read the individual outputs. Instead, using <em>Phase Kickback</em>, it extracts the <strong>global parity</strong> in a single shot!
+                <strong className="text-cyan-300">The Quantum Solution:</strong> A quantum computer doesn't read the individual outputs. Instead, using <em>Phase Kickback</em> and <em>Interference</em>, it determines whether the function is <strong>CONSTANT or BALANCED</strong> in a single shot!
               </div>
             </div>
           </div>
