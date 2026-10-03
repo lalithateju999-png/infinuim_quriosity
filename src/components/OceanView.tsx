@@ -1,5 +1,16 @@
 import React, { useEffect, useRef } from 'react';
 import { GameEngine } from '../game/gameState';
+import {
+  WorldData,
+  Creature,
+  RockFormation,
+  CaveArch,
+  BioPlant,
+  AlienCoral,
+  DistantStructure,
+  PlanktonParticle,
+  AnomalyLocation,
+} from '../game/proceduralGeneration';
 
 interface OceanViewProps {
   engine: GameEngine;
@@ -16,14 +27,14 @@ export const OceanView: React.FC<OceanViewProps> = ({ engine }) => {
       const dt = Math.min((currentTime - lastTime) / 1000, 0.1);
       lastTime = currentTime;
 
-      // Update engine physics and state
+      // Update engine physics, creatures, pulses and state
       engine.update(dt);
 
       const canvas = canvasRef.current;
       if (canvas) {
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          drawOceanWorld(ctx, canvas.width, canvas.height, engine);
+          drawDarkOceanScene(ctx, canvas.width, canvas.height, engine);
         }
       }
 
@@ -51,145 +62,550 @@ export const OceanView: React.FC<OceanViewProps> = ({ engine }) => {
   return (
     <canvas
       ref={canvasRef}
-      className="absolute inset-0 w-full h-full block bg-[#01040a] cursor-crosshair select-none"
+      className="absolute inset-0 w-full h-full block bg-[#010408] cursor-crosshair select-none"
     />
   );
 };
 
-function drawOceanWorld(
+/**
+ * Main Atmospheric Dark Ocean Render Pipeline
+ */
+function drawDarkOceanScene(
   ctx: CanvasRenderingContext2D,
   viewWidth: number,
   viewHeight: number,
   engine: GameEngine
 ) {
-  const { player, world, grover, echoPulses, bubbles, level } = engine;
-  const probs = grover.getProbabilities();
+  const { player, world, echoPulses, bubbles, level, pendingBlinks, status } = engine;
 
-  // Camera tracking centered on player with smooth bounds
+  // Smooth camera tracking centered on player
   const cameraX = Math.max(0, Math.min(world.width - viewWidth, player.x - viewWidth / 2));
   const cameraY = Math.max(0, Math.min(world.height - viewHeight, player.y - viewHeight / 2));
 
   ctx.save();
   ctx.clearRect(0, 0, viewWidth, viewHeight);
 
-  // 1. Draw Deep Ocean Background Gradient
+  // 1. Deep Abyssal Base Gradient (Extremely dark ocean)
   const bgGrad = ctx.createLinearGradient(0, 0, 0, viewHeight);
   bgGrad.addColorStop(0, level.biomeColor.bgTop);
   bgGrad.addColorStop(1, level.biomeColor.bgBottom);
   ctx.fillStyle = bgGrad;
   ctx.fillRect(0, 0, viewWidth, viewHeight);
 
-  // Apply Camera transform for in-world elements
+  // World coordinate space transformation
+  ctx.save();
   ctx.translate(-cameraX, -cameraY);
 
-  // 2. Draw Subtle Ocean Floor / Ambient Seabed Trenches
-  drawSeabedAtmosphere(ctx, world, cameraX, cameraY, viewWidth, viewHeight);
+  // 2. Distant Deep Silhouettes (Faint giant leviathans, ancient structures in deep fog)
+  drawDistantLayer(ctx, world, cameraX, cameraY, viewWidth, viewHeight);
 
-  // 3. Draw Marine Snow Particles (Parallax)
-  ctx.fillStyle = 'rgba(200, 240, 255, 0.4)';
-  world.marineSnow.forEach(flake => {
-    if (
-      flake.x >= cameraX - 50 &&
-      flake.x <= cameraX + viewWidth + 50 &&
-      flake.y >= cameraY - 50 &&
-      flake.y <= cameraY + viewHeight + 50
-    ) {
-      ctx.beginPath();
-      ctx.fillStyle = `rgba(180, 230, 255, ${flake.alpha})`;
-      ctx.arc(flake.x, flake.y, flake.size, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  });
+  // 3. Environment: Caves, Rocks, Corals, Bioluminescent Plants
+  drawEnvironmentGeology(ctx, world, cameraX, cameraY, viewWidth, viewHeight);
 
-  // 4. Draw Marine Life (Jellyfish, Manta Rays, Bioluminescent Fish)
-  drawCreatures(ctx, world.creatures, cameraX, cameraY, viewWidth, viewHeight);
+  // 4. Candidate Locations (Natural geological spires/vents, NO debug primitives)
+  drawGeologicalLocations(ctx, world.locations, cameraX, cameraY, viewWidth, viewHeight);
 
-  // 5. Draw Predators
-  drawPredators(ctx, world.predators, cameraX, cameraY, viewWidth, viewHeight);
+  // 5. Marine Life (Jellyfish, Rays, Squids, Alien Fish, Glowing Fish, Alien Shrimp)
+  drawSeaLife(ctx, world.creatures, cameraX, cameraY, viewWidth, viewHeight);
 
-  // 6. Draw Search Anomaly Nodes (N locations)
-  world.nodes.forEach((node, idx) => {
-    const prob = probs[idx] ?? (1 / level.n);
-    const isTarget = idx === world.targetIndex;
-    drawAnomalyNode(ctx, node, prob, isTarget, engine);
-  });
+  // 6. Plankton & Marine Snow Particles
+  drawPlankton(ctx, world.plankton, cameraX, cameraY, viewWidth, viewHeight);
 
-  // 7. Draw Echo Pulses (Expanding quantum sonar wavefronts)
+  // 7. Expanding Underwater Acoustic Ripple Waves
   echoPulses.forEach(pulse => {
-    drawEchoPulse(ctx, pulse);
+    drawAcousticWave(ctx, pulse);
   });
 
-  // 8. Draw Bubbles
-  ctx.fillStyle = 'rgba(180, 240, 255, 0.6)';
-  bubbles.forEach(b => {
-    ctx.beginPath();
-    ctx.arc(b.x, b.y, b.size, 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(220, 245, 255, ${b.alpha})`;
-    ctx.fill();
-    ctx.strokeStyle = `rgba(125, 211, 252, ${b.alpha * 0.8})`;
-    ctx.lineWidth = 1;
-    ctx.stroke();
-  });
+  // 8. Delayed Companion Bio-Blink (Brief glimpse 2-3s after CALL)
+  drawCompanionBlinkGlimpse(ctx, pendingBlinks, cameraX, cameraY, viewWidth, viewHeight);
 
-  // 9. Draw Player Submarine & Headlight Cones
+  // 9. Cavitation Bubbles
+  drawBubbles(ctx, bubbles);
+
+  // 10. Player Submarine
   drawPlayerSubmarine(ctx, player);
 
-  // 10. Draw Companion if Rescue/Success is active
-  if (engine.status === 'success' && world.nodes[world.targetIndex]) {
-    drawCompanionSubmarine(
+  // 11. Companion Vessel if measurement succeeded
+  if (status === 'success' && world.locations[world.targetIndex]) {
+    drawRescuedCompanion(
       ctx,
-      world.nodes[world.targetIndex],
-      player,
+      world.locations[world.targetIndex],
       engine.companionRescueAnimation
     );
   }
 
+  // 12. Quantum Measurement Collapse Sequence Animation
+  if (status === 'listening_sequence' && engine.measurementResult) {
+    drawQuantumCollapseSequence(ctx, world, engine.measurementResult);
+  }
+
+  // Restore camera transform
   ctx.restore();
 
-  // Draw Vignette / Deep Water Darkness Overlay on Screen Coordinates
-  drawVignette(ctx, viewWidth, viewHeight);
+  // 12. Dynamic Torch & Darkness Mask (Majority of ocean is dark; torch is main visibility)
+  drawTorchDarknessMask(ctx, viewWidth, viewHeight, player, cameraX, cameraY, echoPulses, pendingBlinks);
+
+  // 13. Cinematic Vignette
+  drawCinematicVignette(ctx, viewWidth, viewHeight);
+
+  ctx.restore();
 }
 
-function drawSeabedAtmosphere(
+/**
+ * Distant Deep Background (Whale / Leviathan, ancient spires, deep fog)
+ */
+function drawDistantLayer(
   ctx: CanvasRenderingContext2D,
-  world: { width: number; height: number },
+  world: WorldData,
   camX: number,
   camY: number,
   w: number,
   h: number
 ) {
-  ctx.save();
-  const time = performance.now() * 0.001;
-  const ventCount = 12;
-  for (let i = 0; i < ventCount; i++) {
-    const vx = ((i * 370 + 200) % (world.width - 200));
-    const vy = ((i * 290 + 300) % (world.height - 200));
+  // Distant monoliths and spires
+  world.distantStructures.forEach((struct: DistantStructure) => {
+    if (
+      struct.x + struct.width < camX - 100 ||
+      struct.x > camX + w + 100 ||
+      struct.y + struct.height < camY - 100 ||
+      struct.y > camY + h + 100
+    ) {
+      return;
+    }
 
-    if (vx >= camX - 300 && vx <= camX + w + 300 && vy >= camY - 300 && vy <= camY + h + 300) {
-      const grad = ctx.createRadialGradient(vx, vy, 10, vx, vy, 240);
-      const pulse = 0.5 + 0.5 * Math.sin(time * 0.8 + i);
-      grad.addColorStop(0, `rgba(6, 182, 212, ${0.08 + pulse * 0.05})`);
-      grad.addColorStop(1, 'rgba(6, 182, 212, 0)');
+    ctx.save();
+    ctx.fillStyle = `rgba(3, 14, 28, ${struct.alpha})`;
+    ctx.strokeStyle = `rgba(6, 182, 212, ${struct.alpha * 0.4})`;
+    ctx.lineWidth = 1.5;
 
-      ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(struct.x - struct.width / 2, struct.y + struct.height);
+    ctx.lineTo(struct.x - struct.width * 0.3, struct.y);
+    ctx.lineTo(struct.x + struct.width * 0.3, struct.y);
+    ctx.lineTo(struct.x + struct.width / 2, struct.y + struct.height);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  });
+
+  // Distant Giant Whale / Leviathan (rare, slow, majestic)
+  const whale = world.creatures.find(c => c.type === 'giant_whale');
+  if (whale) {
+    if (
+      whale.x + whale.size * 2 >= camX - 300 &&
+      whale.x - whale.size * 2 <= camX + w + 300 &&
+      whale.y + whale.size >= camY - 200 &&
+      whale.y - whale.size <= camY + h + 200
+    ) {
+      ctx.save();
+      ctx.translate(whale.x, whale.y);
+      const isFacingRight = whale.vx >= 0;
+      if (!isFacingRight) ctx.scale(-1, 1);
+
+      // Deep water silhouette with faint bioluminescent ridges
+      ctx.fillStyle = 'rgba(2, 10, 22, 0.65)';
+      ctx.strokeStyle = 'rgba(14, 116, 144, 0.25)';
+      ctx.lineWidth = 2;
+
+      // Whale Body
       ctx.beginPath();
-      ctx.arc(vx, vy, 240, 0, Math.PI * 2);
+      ctx.moveTo(-whale.size * 0.9, 0);
+      ctx.bezierCurveTo(
+        -whale.size * 0.5,
+        -whale.size * 0.45,
+        whale.size * 0.4,
+        -whale.size * 0.4,
+        whale.size * 0.95,
+        0
+      );
+      ctx.bezierCurveTo(
+        whale.size * 0.5,
+        whale.size * 0.35,
+        -whale.size * 0.4,
+        whale.size * 0.35,
+        -whale.size * 0.9,
+        0
+      );
+      ctx.closePath();
       ctx.fill();
+      ctx.stroke();
+
+      // Fluke / Tail
+      const tailWave = Math.sin(whale.pulsePhase * 0.8) * 12;
+      ctx.beginPath();
+      ctx.moveTo(-whale.size * 0.9, 0);
+      ctx.lineTo(-whale.size * 1.25, -whale.size * 0.3 + tailWave);
+      ctx.lineTo(-whale.size * 1.15, 0);
+      ctx.lineTo(-whale.size * 1.25, whale.size * 0.3 + tailWave);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(2, 10, 22, 0.6)';
+      ctx.fill();
+
+      // Faint bioluminescent flank markings
+      ctx.strokeStyle = `rgba(56, 189, 248, ${0.08 + 0.05 * Math.sin(whale.pulsePhase)})`;
+      ctx.lineWidth = 1.5;
+      for (let r = -whale.size * 0.4; r <= whale.size * 0.5; r += 26) {
+        ctx.beginPath();
+        ctx.moveTo(r, -whale.size * 0.15);
+        ctx.lineTo(r - 8, whale.size * 0.1);
+        ctx.stroke();
+      }
+
+      ctx.restore();
     }
   }
-  ctx.restore();
 }
 
-function drawCreatures(
+/**
+ * Environment Geology (Caves, Rocks, Corals, Bioluminescent Plants)
+ */
+function drawEnvironmentGeology(
   ctx: CanvasRenderingContext2D,
-  creatures: any[],
+  world: WorldData,
   camX: number,
   camY: number,
   w: number,
   h: number
 ) {
-  creatures.forEach(c => {
-    if (c.x < camX - 100 || c.x > camX + w + 100 || c.y < camY - 100 || c.y > camY + h + 100) {
+  // 1. Caves & Deep Crevices
+  world.caves.forEach((cave: CaveArch) => {
+    if (
+      cave.x + cave.radiusX < camX - 100 ||
+      cave.x - cave.radiusX > camX + w + 100 ||
+      cave.y + cave.radiusY < camY - 100 ||
+      cave.y - cave.radiusY > camY + h + 100
+    ) {
+      return;
+    }
+
+    ctx.save();
+    ctx.translate(cave.x, cave.y);
+    ctx.rotate(cave.rotation);
+
+    // Deep cave darkness
+    const caveGrad = ctx.createRadialGradient(0, 0, 5, 0, 0, cave.radiusX);
+    caveGrad.addColorStop(0, 'rgba(0, 2, 4, 0.98)');
+    caveGrad.addColorStop(0.7, 'rgba(1, 5, 12, 0.85)');
+    caveGrad.addColorStop(1, 'rgba(2, 12, 24, 0)');
+
+    ctx.fillStyle = caveGrad;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, cave.radiusX, cave.radiusY, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Subtle bio-rim on cave edge
+    ctx.strokeStyle = 'rgba(14, 116, 144, 0.3)';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+
+    ctx.restore();
+  });
+
+  // 2. Rocks & Boulders
+  world.rocks.forEach((rock: RockFormation) => {
+    if (
+      rock.x + rock.radius < camX - 100 ||
+      rock.x - rock.radius > camX + w + 100 ||
+      rock.y + rock.radius < camY - 100 ||
+      rock.y - rock.radius > camY + h + 100
+    ) {
+      return;
+    }
+
+    ctx.save();
+    ctx.translate(rock.x, rock.y);
+
+    ctx.fillStyle = '#07121e';
+    ctx.strokeStyle = 'rgba(30, 58, 86, 0.6)';
+    ctx.lineWidth = 2;
+
+    ctx.beginPath();
+    rock.points.forEach((pt, i) => {
+      if (i === 0) ctx.moveTo(pt.x, pt.y);
+      else ctx.lineTo(pt.x, pt.y);
+    });
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Rock striations / cracks
+    if (rock.hasClefts) {
+      ctx.strokeStyle = 'rgba(8, 28, 48, 0.8)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(-rock.radius * 0.4, -rock.radius * 0.3);
+      ctx.lineTo(rock.radius * 0.1, rock.radius * 0.2);
+      ctx.lineTo(rock.radius * 0.5, rock.radius * 0.1);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  });
+
+  // 3. Alien Reef & Coral Formations
+  world.corals.forEach((coral: AlienCoral) => {
+    if (
+      coral.x + coral.size < camX - 100 ||
+      coral.x - coral.size > camX + w + 100 ||
+      coral.y + coral.size < camY - 100 ||
+      coral.y - coral.size > camY + h + 100
+    ) {
+      return;
+    }
+
+    ctx.save();
+    ctx.translate(coral.x, coral.y);
+
+    // Coral soft glow
+    const coralGlow = ctx.createRadialGradient(0, 0, 2, 0, 0, coral.size * 1.4);
+    coralGlow.addColorStop(0, `hsla(${coral.hue}, 80%, 65%, ${coral.glowIntensity * 0.4})`);
+    coralGlow.addColorStop(1, `hsla(${coral.hue}, 80%, 50%, 0)`);
+    ctx.fillStyle = coralGlow;
+    ctx.beginPath();
+    ctx.arc(0, 0, coral.size * 1.4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Coral Branches
+    ctx.strokeStyle = `hsla(${coral.hue}, 70%, 55%, 0.75)`;
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+
+    coral.branches.forEach(branch => {
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      const bx = Math.cos(branch.angle) * branch.length;
+      const by = Math.sin(branch.angle) * branch.length;
+      ctx.lineTo(bx, by);
+      ctx.stroke();
+
+      // Branch tip polyp
+      ctx.fillStyle = `hsla(${coral.hue}, 90%, 75%, 0.85)`;
+      ctx.beginPath();
+      ctx.arc(bx, by, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    ctx.restore();
+  });
+
+  // 4. Bioluminescent Plants (Alien kelp, anemones, spore tendrils)
+  world.plants.forEach((plant: BioPlant) => {
+    if (
+      plant.x < camX - 100 ||
+      plant.x > camX + w + 100 ||
+      plant.y < camY - 100 ||
+      plant.y > camY + h + 100
+    ) {
+      return;
+    }
+
+    ctx.save();
+    ctx.translate(plant.x, plant.y);
+
+    const resonance = plant.resonanceEnergy; // boosted by echo pulses
+    const sway = Math.sin(plant.swayPhase) * (plant.height * 0.25);
+
+    if (plant.type === 'kelp') {
+      // Fluid undulating stem
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.bezierCurveTo(
+        sway * 0.4,
+        -plant.height * 0.35,
+        -sway * 0.6,
+        -plant.height * 0.7,
+        sway,
+        -plant.height
+      );
+      ctx.strokeStyle = `hsla(${plant.hue}, 75%, 45%, ${0.5 + resonance * 0.5})`;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+
+      // Glowing bioluminescent leaves along stem
+      for (let i = 1; i <= 3; i++) {
+        const frac = i / 3.5;
+        const ly = -plant.height * frac;
+        const lx = sway * frac;
+        const leafSway = Math.sin(plant.swayPhase + i) * 12;
+
+        ctx.fillStyle = `hsla(${plant.hue}, 85%, 65%, ${0.35 + resonance * 0.6})`;
+        ctx.beginPath();
+        ctx.ellipse(lx + leafSway, ly, 7, 3, plant.swayPhase + i, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else if (plant.type === 'anemone') {
+      // Glowing tentacles radiating outward
+      const tentacleCount = 6;
+      for (let t = 0; t < tentacleCount; t++) {
+        const angle = -Math.PI / 2 + ((t - tentacleCount / 2) * 0.4);
+        const len = plant.height * (0.8 + 0.2 * Math.sin(plant.swayPhase + t));
+        const tx = Math.cos(angle) * len;
+        const ty = Math.sin(angle) * len;
+
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.quadraticCurveTo(tx * 0.5 + Math.sin(plant.swayPhase + t) * 6, ty * 0.5, tx, ty);
+        ctx.strokeStyle = `hsla(${plant.hue}, 85%, 60%, ${0.45 + resonance * 0.55})`;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.fillStyle = `hsla(${plant.hue}, 95%, 75%, ${0.6 + resonance * 0.4})`;
+        ctx.beginPath();
+        ctx.arc(tx, ty, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else {
+      // Spore tendril: vertical stalk with pulsing spore bulb
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(sway * 0.5, -plant.height);
+      ctx.strokeStyle = `hsla(${plant.hue}, 70%, 40%, 0.6)`;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // Spore Bulb
+      const bulbGlow = ctx.createRadialGradient(
+        sway * 0.5,
+        -plant.height,
+        1,
+        sway * 0.5,
+        -plant.height,
+        14
+      );
+      bulbGlow.addColorStop(0, `hsla(${plant.hue}, 95%, 75%, ${0.7 + resonance * 0.3})`);
+      bulbGlow.addColorStop(1, `hsla(${plant.hue}, 90%, 50%, 0)`);
+      ctx.fillStyle = bulbGlow;
+      ctx.beginPath();
+      ctx.arc(sway * 0.5, -plant.height, 14, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+  });
+}
+
+/**
+ * Natural Geological Candidate Locations (No debug balls, no lines, organic spires/vents)
+ */
+function drawGeologicalLocations(
+  ctx: CanvasRenderingContext2D,
+  locations: AnomalyLocation[],
+  camX: number,
+  camY: number,
+  w: number,
+  h: number
+) {
+  locations.forEach(loc => {
+    if (
+      loc.x < camX - 120 ||
+      loc.x > camX + w + 120 ||
+      loc.y < camY - 120 ||
+      loc.y > camY + h + 120
+    ) {
+      return;
+    }
+
+    ctx.save();
+    ctx.translate(loc.x, loc.y);
+
+    const resonance = loc.resonanceExcitation; // 0 to 1 when hit by echo pulse
+    const pulse = 0.5 + 0.5 * Math.sin(loc.pulsePhase);
+
+    // Natural geological feature shape
+    if (loc.geologyType === 'crystal_chimney') {
+      // Hydrothermal crystal spire
+      ctx.fillStyle = '#0a1622';
+      ctx.strokeStyle = `rgba(56, 189, 248, ${0.25 + resonance * 0.65})`;
+      ctx.lineWidth = 2;
+
+      ctx.beginPath();
+      ctx.moveTo(-18, 30);
+      ctx.lineTo(-8, -25);
+      ctx.lineTo(0, -38);
+      ctx.lineTo(8, -25);
+      ctx.lineTo(18, 30);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Crystal facet highlights
+      ctx.beginPath();
+      ctx.moveTo(0, -38);
+      ctx.lineTo(0, 30);
+      ctx.stroke();
+
+      // Subtle vent glow at apex
+      const apexGlow = ctx.createRadialGradient(0, -38, 2, 0, -38, 24 + resonance * 20);
+      apexGlow.addColorStop(0, `rgba(56, 189, 248, ${0.3 + pulse * 0.2 + resonance * 0.5})`);
+      apexGlow.addColorStop(1, 'rgba(56, 189, 248, 0)');
+      ctx.fillStyle = apexGlow;
+      ctx.beginPath();
+      ctx.arc(0, -38, 24 + resonance * 20, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (loc.geologyType === 'coral_spire') {
+      // Ancient coral spire
+      ctx.fillStyle = '#08131d';
+      ctx.strokeStyle = `rgba(6, 182, 212, ${0.25 + resonance * 0.65})`;
+      ctx.lineWidth = 2;
+
+      ctx.beginPath();
+      ctx.arc(0, 0, 24, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      const glow = ctx.createRadialGradient(0, 0, 4, 0, 0, 30 + resonance * 20);
+      glow.addColorStop(0, `rgba(6, 182, 212, ${0.25 + pulse * 0.2 + resonance * 0.5})`);
+      glow.addColorStop(1, 'rgba(6, 182, 212, 0)');
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(0, 0, 30 + resonance * 20, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      // Abyssal vent or cavern crevice
+      ctx.fillStyle = '#050c14';
+      ctx.strokeStyle = `rgba(129, 140, 248, ${0.2 + resonance * 0.6})`;
+      ctx.lineWidth = 2;
+
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 28, 16, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      const ventGlow = ctx.createRadialGradient(0, 0, 3, 0, 0, 26 + resonance * 18);
+      ventGlow.addColorStop(0, `rgba(129, 140, 248, ${0.2 + pulse * 0.2 + resonance * 0.5})`);
+      ventGlow.addColorStop(1, 'rgba(129, 140, 248, 0)');
+      ctx.fillStyle = ventGlow;
+      ctx.beginPath();
+      ctx.arc(0, 0, 26 + resonance * 18, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+  });
+}
+
+/**
+ * Sea Life Rendering (Strictly ONLY allowed animals)
+ */
+function drawSeaLife(
+  ctx: CanvasRenderingContext2D,
+  creatures: Creature[],
+  camX: number,
+  camY: number,
+  w: number,
+  h: number
+) {
+  creatures.forEach((c: Creature) => {
+    // Skip whale here as it is drawn in background layer
+    if (c.type === 'giant_whale') return;
+
+    if (
+      c.x < camX - 100 ||
+      c.x > camX + w + 100 ||
+      c.y < camY - 100 ||
+      c.y > camY + h + 100
+    ) {
       return;
     }
 
@@ -197,63 +613,166 @@ function drawCreatures(
     ctx.translate(c.x, c.y);
 
     if (c.type === 'jellyfish') {
+      // Pulsing translucent bell with glowing tendrils
       const pulse = Math.sin(c.pulsePhase);
       const capRadius = c.size * (0.85 + pulse * 0.15);
 
-      const glow = ctx.createRadialGradient(0, 0, 2, 0, 0, capRadius * 1.8);
-      glow.addColorStop(0, `hsla(${c.hue}, 90%, 75%, 0.6)`);
-      glow.addColorStop(1, `hsla(${c.hue}, 90%, 50%, 0)`);
-      ctx.fillStyle = glow;
+      // Bell Aura
+      const aura = ctx.createRadialGradient(0, 0, 2, 0, 0, capRadius * 1.8);
+      aura.addColorStop(0, `hsla(${c.hue}, 90%, 70%, 0.4)`);
+      aura.addColorStop(1, `hsla(${c.hue}, 90%, 50%, 0)`);
+      ctx.fillStyle = aura;
       ctx.beginPath();
       ctx.arc(0, 0, capRadius * 1.8, 0, Math.PI * 2);
       ctx.fill();
 
+      // Translucent Bell Cap
       ctx.beginPath();
-      ctx.fillStyle = `hsla(${c.hue}, 85%, 65%, 0.5)`;
+      ctx.fillStyle = `hsla(${c.hue}, 80%, 60%, 0.35)`;
       ctx.arc(0, 0, capRadius, Math.PI, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = `hsla(${c.hue}, 95%, 85%, 0.9)`;
+      ctx.strokeStyle = `hsla(${c.hue}, 95%, 85%, 0.8)`;
       ctx.lineWidth = 1.5;
       ctx.stroke();
 
-      ctx.strokeStyle = `hsla(${c.hue}, 80%, 75%, 0.4)`;
+      // Trailing tentacles
+      ctx.strokeStyle = `hsla(${c.hue}, 85%, 75%, 0.5)`;
       ctx.lineWidth = 1.2;
       for (let t = -2; t <= 2; t++) {
         ctx.beginPath();
-        const tx = t * (capRadius * 0.3);
+        const tx = t * (capRadius * 0.28);
         ctx.moveTo(tx, 0);
-        const wave = Math.sin(c.pulsePhase + t * 0.8) * 6;
-        ctx.quadraticCurveTo(tx + wave, capRadius * 0.8, tx - wave, capRadius * 1.6);
+        const wave = Math.sin(c.pulsePhase + t * 0.7) * 7;
+        ctx.quadraticCurveTo(tx + wave, capRadius * 0.9, tx - wave * 0.5, capRadius * 1.8);
         ctx.stroke();
       }
-    } else if (c.type === 'manta') {
-      const angle = Math.atan2(c.vy, c.vx);
-      ctx.rotate(angle);
+    } else if (c.type === 'ray') {
+      // Graceful manta / ray with flowing wings
+      ctx.rotate(c.angle);
+      const wingFlap = Math.sin(c.pulsePhase) * 0.25;
 
-      ctx.fillStyle = 'rgba(56, 189, 248, 0.25)';
-      ctx.beginPath();
-      ctx.ellipse(0, 0, c.size, c.size * 0.4, 0, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.fillStyle = 'rgba(6, 24, 42, 0.85)';
+      ctx.strokeStyle = `hsla(${c.hue}, 80%, 70%, 0.7)`;
+      ctx.lineWidth = 1.8;
 
-      ctx.strokeStyle = 'rgba(186, 230, 253, 0.8)';
-      ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(c.size * 0.8, 0);
-      ctx.lineTo(-c.size * 0.4, -c.size * 0.7);
+      ctx.lineTo(-c.size * 0.3, -c.size * (0.8 + wingFlap));
       ctx.lineTo(-c.size * 0.6, 0);
-      ctx.lineTo(-c.size * 0.4, c.size * 0.7);
+      ctx.lineTo(-c.size * 0.3, c.size * (0.8 + wingFlap));
       ctx.closePath();
+      ctx.fill();
       ctx.stroke();
 
+      // Trailing thin tail
       ctx.beginPath();
       ctx.moveTo(-c.size * 0.6, 0);
-      ctx.lineTo(-c.size * 1.4, 0);
-      ctx.strokeStyle = 'rgba(125, 211, 252, 0.5)';
+      ctx.lineTo(-c.size * 1.5, Math.sin(c.pulsePhase * 1.5) * 4);
+      ctx.strokeStyle = `hsla(${c.hue}, 80%, 70%, 0.45)`;
       ctx.stroke();
-    } else {
-      ctx.fillStyle = `hsla(${c.hue}, 90%, 75%, 0.8)`;
+    } else if (c.type === 'squid') {
+      // Alien squid with reactive jet propulsion
+      ctx.rotate(c.angle);
+
+      // Mantle
+      ctx.fillStyle = 'rgba(8, 28, 48, 0.85)';
+      ctx.strokeStyle = `hsla(${c.hue}, 85%, 75%, 0.75)`;
+      ctx.lineWidth = 1.5;
+
       ctx.beginPath();
-      ctx.ellipse(0, 0, c.size, c.size * 0.4, 0, 0, Math.PI * 2);
+      ctx.moveTo(c.size * 0.9, 0);
+      ctx.lineTo(-c.size * 0.2, -c.size * 0.4);
+      ctx.lineTo(-c.size * 0.5, 0);
+      ctx.lineTo(-c.size * 0.2, c.size * 0.4);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Trailing tentacles
+      for (let t = -1; t <= 1; t++) {
+        ctx.beginPath();
+        ctx.moveTo(-c.size * 0.5, t * 3);
+        const wave = Math.sin(c.pulsePhase + t) * 5;
+        ctx.lineTo(-c.size * 1.3, t * 4 + wave);
+        ctx.strokeStyle = `hsla(${c.hue}, 90%, 80%, 0.6)`;
+        ctx.stroke();
+      }
+    } else if (c.type === 'alien_fish') {
+      // Sleek bioluminescent alien fish with organic tail and fins (no forward beam lines)
+      ctx.rotate(c.angle);
+
+      // Tail fin
+      ctx.fillStyle = `hsla(${c.hue}, 80%, 65%, 0.6)`;
+      ctx.beginPath();
+      ctx.moveTo(-c.size * 0.7, 0);
+      ctx.lineTo(-c.size * 1.3, -c.size * 0.4);
+      ctx.lineTo(-c.size * 1.1, 0);
+      ctx.lineTo(-c.size * 1.3, c.size * 0.4);
+      ctx.closePath();
+      ctx.fill();
+
+      // Fish Body
+      ctx.fillStyle = 'rgba(6, 24, 44, 0.9)';
+      ctx.strokeStyle = `hsla(${c.hue}, 85%, 75%, 0.75)`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, c.size, c.size * 0.38, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      // Soft glowing dorsal fin
+      ctx.fillStyle = `hsla(${c.hue}, 90%, 75%, 0.5)`;
+      ctx.beginPath();
+      ctx.moveTo(-c.size * 0.2, -c.size * 0.38);
+      ctx.quadraticCurveTo(0, -c.size * 0.7, c.size * 0.3, -c.size * 0.38);
+      ctx.fill();
+
+      // Subtle biological glowing eye
+      ctx.fillStyle = `hsla(${c.hue}, 95%, 85%, 0.9)`;
+      ctx.beginPath();
+      ctx.arc(c.size * 0.55, -2, 1.8, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (c.type === 'glowing_fish') {
+      // Small glowing fish with organic swimming tail (no beam lines)
+      ctx.rotate(c.angle);
+
+      const tailWiggle = Math.sin(c.pulsePhase * 3) * (c.size * 0.25);
+
+      // Tail
+      ctx.fillStyle = `hsla(${c.hue}, 90%, 70%, 0.6)`;
+      ctx.beginPath();
+      ctx.moveTo(-c.size * 0.6, 0);
+      ctx.lineTo(-c.size * 1.2, -c.size * 0.35 + tailWiggle);
+      ctx.lineTo(-c.size * 1.2, c.size * 0.35 + tailWiggle);
+      ctx.closePath();
+      ctx.fill();
+
+      // Soft body
+      ctx.fillStyle = `hsla(${c.hue}, 90%, 80%, 0.85)`;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, c.size, c.size * 0.35, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Soft biological eye
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(c.size * 0.5, -1, 1.2, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (c.type === 'alien_shrimp') {
+      // Tiny curved alien shrimp (no forward beam lines/torches)
+      ctx.rotate(c.angle);
+      ctx.fillStyle = `hsla(${c.hue}, 80%, 65%, 0.75)`;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, c.size, c.size * 0.32, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Small fan tail
+      ctx.fillStyle = `hsla(${c.hue}, 85%, 75%, 0.6)`;
+      ctx.beginPath();
+      ctx.moveTo(-c.size * 0.8, 0);
+      ctx.lineTo(-c.size * 1.2, -3);
+      ctx.lineTo(-c.size * 1.2, 3);
+      ctx.closePath();
       ctx.fill();
     }
 
@@ -261,222 +780,291 @@ function drawCreatures(
   });
 }
 
-function drawPredators(
+/**
+ * Plankton & Marine Snow Particles
+ */
+function drawPlankton(
   ctx: CanvasRenderingContext2D,
-  predators: any[],
+  plankton: PlanktonParticle[],
   camX: number,
   camY: number,
   w: number,
   h: number
 ) {
-  predators.forEach(p => {
-    if (p.x < camX - 200 || p.x > camX + w + 200 || p.y < camY - 200 || p.y > camY + h + 200) {
+  plankton.forEach(p => {
+    if (
+      p.x < camX - 40 ||
+      p.x > camX + w + 40 ||
+      p.y < camY - 40 ||
+      p.y > camY + h + 40
+    ) {
       return;
     }
 
-    ctx.save();
-    ctx.translate(p.x, p.y);
-    ctx.rotate(p.angle);
-
-    ctx.fillStyle = 'rgba(6, 10, 20, 0.9)';
+    const pulse = 0.6 + 0.4 * Math.sin(p.pulsePhase);
+    ctx.fillStyle = `hsla(${p.hue}, 80%, 75%, ${p.alpha * pulse})`;
     ctx.beginPath();
-    ctx.ellipse(0, 0, 70, 24, 0, 0, Math.PI * 2);
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
     ctx.fill();
-
-    const eyeAlpha = 0.3 + p.aggroLevel * 0.7;
-    ctx.fillStyle = `rgba(244, 63, 94, ${eyeAlpha})`;
-    ctx.beginPath();
-    ctx.arc(35, -7, 4, 0, Math.PI * 2);
-    ctx.arc(35, 7, 4, 0, Math.PI * 2);
-    ctx.fill();
-
-    if (p.aggroLevel > 0.4) {
-      ctx.strokeStyle = `rgba(239, 68, 68, ${p.aggroLevel * 0.8})`;
-      ctx.lineWidth = 2;
-      for (let r = -30; r <= 20; r += 12) {
-        ctx.beginPath();
-        ctx.moveTo(r, -15);
-        ctx.lineTo(r - 5, -25);
-        ctx.stroke();
-      }
-    }
-
-    ctx.restore();
   });
 }
 
-function drawAnomalyNode(
-  ctx: CanvasRenderingContext2D,
-  node: any,
-  prob: number,
-  isTarget: boolean,
-  engine: GameEngine
-) {
-  const time = performance.now() * 0.001;
-  const isOptimalReached = engine.grover.iterations === engine.grover.optimalIterations;
-  const isOvershot = engine.grover.iterations > engine.grover.optimalIterations;
-
+/**
+ * Expanding Underwater Acoustic Ripple
+ */
+function drawAcousticWave(ctx: CanvasRenderingContext2D, pulse: any) {
   ctx.save();
-  ctx.translate(node.x, node.y);
 
-  const baseGlowRadius = 40 + prob * 140;
-  const pulseScale = 1.0 + 0.15 * Math.sin(time * (2.0 + prob * 8.0) + node.pulsePhase);
-  const currentGlowRadius = baseGlowRadius * pulseScale;
+  const isReturnWave = pulse.color === '#facc15';
 
-  const glowGrad = ctx.createRadialGradient(0, 0, 5, 0, 0, currentGlowRadius);
-
-  if (isOptimalReached && isTarget) {
-    glowGrad.addColorStop(0, `rgba(56, 189, 248, ${0.4 + prob * 0.5})`);
-    glowGrad.addColorStop(0.5, `rgba(6, 182, 212, ${0.2 + prob * 0.3})`);
-    glowGrad.addColorStop(1, 'rgba(6, 182, 212, 0)');
-  } else if (isOvershot && isTarget) {
-    glowGrad.addColorStop(0, `rgba(244, 63, 94, ${0.3 + prob * 0.4})`);
-    glowGrad.addColorStop(0.6, `rgba(168, 85, 247, ${0.15 + prob * 0.2})`);
-    glowGrad.addColorStop(1, 'rgba(168, 85, 247, 0)');
-  } else {
-    const alpha = 0.15 + prob * 0.6;
-    glowGrad.addColorStop(0, `rgba(56, 189, 248, ${alpha})`);
-    glowGrad.addColorStop(0.6, `rgba(14, 116, 144, ${alpha * 0.4})`);
-    glowGrad.addColorStop(1, 'rgba(14, 116, 144, 0)');
-  }
-
-  ctx.fillStyle = glowGrad;
-  ctx.beginPath();
-  ctx.arc(0, 0, currentGlowRadius, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.fillStyle = '#0f172a';
-  ctx.strokeStyle = `rgba(56, 189, 248, ${0.4 + prob * 0.6})`;
-  ctx.lineWidth = 2;
-
-  if (node.type === 'crystal') {
+  if (isReturnWave) {
+    // Golden Companion Bio-Resonance Wavefront
     ctx.beginPath();
-    for (let i = 0; i < 6; i++) {
-      const a = (i * Math.PI) / 3;
-      const r = node.baseRadius * (0.8 + 0.2 * Math.sin(node.pulsePhase));
-      const px = Math.cos(a) * r;
-      const py = Math.sin(a) * r;
-      if (i === 0) ctx.moveTo(px, py);
-      else ctx.lineTo(px, py);
-    }
-    ctx.closePath();
-    ctx.fill();
+    ctx.arc(pulse.originX, pulse.originY, pulse.radius, 0, Math.PI * 2);
+    ctx.strokeStyle = '#fef08a';
+    ctx.globalAlpha = pulse.alpha * 0.95;
+    ctx.lineWidth = 4;
     ctx.stroke();
-  } else if (node.type === 'vent') {
-    ctx.beginPath();
-    ctx.moveTo(-16, 20);
-    ctx.lineTo(-8, -20);
-    ctx.lineTo(8, -20);
-    ctx.lineTo(16, 20);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-  } else {
-    ctx.beginPath();
-    ctx.arc(0, 0, node.baseRadius * 0.75, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-  }
 
-  const coreRadius = 4 + prob * 12;
-  ctx.fillStyle = isOptimalReached && isTarget
-    ? '#ffffff'
-    : `rgba(224, 242, 254, ${0.6 + prob * 0.4})`;
-  ctx.beginPath();
-  ctx.arc(0, 0, coreRadius, 0, Math.PI * 2);
-  ctx.fill();
+    ctx.beginPath();
+    ctx.arc(pulse.originX, pulse.originY, Math.max(0, pulse.radius - 12), 0, Math.PI * 2);
+    ctx.strokeStyle = '#facc15';
+    ctx.globalAlpha = pulse.alpha * 0.6;
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
 
-  if (prob > 0.3) {
-    ctx.strokeStyle = `rgba(56, 189, 248, ${prob * 0.5})`;
+    ctx.beginPath();
+    ctx.arc(pulse.originX, pulse.originY, Math.max(0, pulse.radius - 24), 0, Math.PI * 2);
+    ctx.strokeStyle = '#eab308';
+    ctx.globalAlpha = pulse.alpha * 0.3;
     ctx.lineWidth = 1.5;
+    ctx.stroke();
+  } else {
+    // Standard Player Outgoing Sonar Pulse
     ctx.beginPath();
-    ctx.arc(0, 0, (node.baseRadius + 10) * pulseScale, 0, Math.PI * 2);
+    ctx.arc(pulse.originX, pulse.originY, pulse.radius, 0, Math.PI * 2);
+    ctx.strokeStyle = pulse.color;
+    ctx.globalAlpha = pulse.alpha * 0.7;
+    ctx.lineWidth = 3.5;
+    ctx.stroke();
+
+    // Soft outer refraction wavefront
+    ctx.beginPath();
+    ctx.arc(pulse.originX, pulse.originY, Math.max(0, pulse.radius - 8), 0, Math.PI * 2);
+    ctx.strokeStyle = pulse.color;
+    ctx.globalAlpha = pulse.alpha * 0.3;
+    ctx.lineWidth = 1.5;
     ctx.stroke();
   }
 
-  ctx.font = '10px "JetBrains Mono", monospace';
-  ctx.fillStyle = 'rgba(148, 163, 184, 0.7)';
-  ctx.textAlign = 'center';
-  ctx.fillText(node.label, 0, node.baseRadius + 18);
-
   ctx.restore();
 }
 
-function drawEchoPulse(ctx: CanvasRenderingContext2D, pulse: any) {
-  ctx.save();
-  ctx.beginPath();
-  ctx.arc(pulse.originX, pulse.originY, pulse.radius, 0, Math.PI * 2);
-  ctx.strokeStyle = pulse.color;
-  ctx.globalAlpha = pulse.alpha * 0.75;
-  ctx.lineWidth = 3.5;
-  ctx.stroke();
-
-  ctx.beginPath();
-  ctx.arc(pulse.originX, pulse.originY, pulse.radius + 6, 0, Math.PI * 2);
-  ctx.lineWidth = 1.5;
-  ctx.globalAlpha = pulse.alpha * 0.35;
-  ctx.stroke();
-
-  ctx.restore();
-}
-
-function drawPlayerSubmarine(
+/**
+ * Delayed Companion Bio-Blink Glimpse (2-3s after CALL)
+ * Does NOT stay visible. Blinks briefly, clarity scales with targetProbability.
+ */
+function drawCompanionBlinkGlimpse(
   ctx: CanvasRenderingContext2D,
-  player: any
+  pendingBlinks: any[],
+  camX: number,
+  camY: number,
+  w: number,
+  h: number
 ) {
+  pendingBlinks.forEach(blink => {
+    if (!blink.isBlinking) return; // Still waiting the 2-3s delay
+
+    // Bell curve smooth fade-in and fade-out over blinkDuration
+    const progress = Math.min(1.0, blink.blinkElapsed / blink.blinkDuration);
+    const envelope = Math.sin(progress * Math.PI); // 0 -> 1 -> 0
+    const prob = Math.max(0.08, Math.min(1.0, blink.targetProbability));
+    const effectiveAlpha = envelope * (0.2 + prob * 0.75);
+
+    const screenX = blink.x - camX;
+    const screenY = blink.y - camY;
+    const isOffScreen =
+      screenX < 50 || screenX > w - 50 || screenY < 50 || screenY > h - 50;
+
+    if (!isOffScreen) {
+      // On-Screen direct glimpse
+      const radius = 25 + prob * 65;
+
+      ctx.save();
+      ctx.translate(blink.x, blink.y);
+
+      // Companion bio-resonance halo
+      const aura = ctx.createRadialGradient(0, 0, 2, 0, 0, radius);
+      aura.addColorStop(0, `rgba(250, 204, 21, ${effectiveAlpha})`);
+      aura.addColorStop(0.5, `rgba(234, 179, 8, ${effectiveAlpha * 0.4})`);
+      aura.addColorStop(1, 'rgba(234, 179, 8, 0)');
+      ctx.fillStyle = aura;
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Faint submarine silhouette glimpse (only clear when probability is high)
+      if (prob > 0.25) {
+        ctx.fillStyle = '#1c1917';
+        ctx.strokeStyle = `rgba(250, 204, 21, ${effectiveAlpha * 0.9})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 18, 10, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = `rgba(254, 240, 138, ${effectiveAlpha})`;
+        ctx.beginPath();
+        ctx.arc(4, 0, 5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.restore();
+    } else {
+      // Off-Screen directional sonar ping arc on screen edge
+      const centerX = camX + w / 2;
+      const centerY = camY + h / 2;
+      const angle = Math.atan2(blink.y - centerY, blink.x - centerX);
+
+      // Position clamped to screen border
+      const edgePadding = 45;
+      const edgeWorldX = centerX + Math.cos(angle) * (w / 2 - edgePadding);
+      const edgeWorldY = centerY + Math.sin(angle) * (h / 2 - edgePadding);
+
+      ctx.save();
+      ctx.translate(edgeWorldX, edgeWorldY);
+      ctx.rotate(angle);
+
+      // Expanding directional echo wave arc
+      const waveRadius = 15 + envelope * 25;
+      ctx.strokeStyle = `rgba(250, 204, 21, ${effectiveAlpha * 0.9})`;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, waveRadius, -Math.PI / 3, Math.PI / 3);
+      ctx.stroke();
+
+      ctx.strokeStyle = `rgba(250, 204, 21, ${effectiveAlpha * 0.5})`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, waveRadius + 10, -Math.PI / 4, Math.PI / 4);
+      ctx.stroke();
+
+      ctx.restore();
+    }
+  });
+}
+
+/**
+ * Player Submarine with Volumetric High-Intensity Torch Beam
+ */
+function drawPlayerSubmarine(ctx: CanvasRenderingContext2D, player: any) {
   ctx.save();
   ctx.translate(player.x, player.y);
-
-  // 1. Forward Headlights Beam
-  ctx.save();
   ctx.rotate(player.angle);
 
-  const lightGrad = ctx.createRadialGradient(15, 0, 10, 160, 0, player.lightDistance);
-  lightGrad.addColorStop(0, 'rgba(240, 249, 255, 0.45)');
-  lightGrad.addColorStop(0.3, 'rgba(186, 230, 253, 0.25)');
-  lightGrad.addColorStop(0.7, 'rgba(56, 189, 248, 0.1)');
-  lightGrad.addColorStop(1, 'rgba(56, 189, 248, 0)');
+  // 1. High-Intensity Volumetric Torch Beam in World Layer
+  ctx.save();
 
-  ctx.fillStyle = lightGrad;
+  // Outer Volumetric Cone
+  const outerBeamGrad = ctx.createRadialGradient(
+    20,
+    0,
+    10,
+    220,
+    0,
+    player.lightDistance
+  );
+  outerBeamGrad.addColorStop(0, 'rgba(240, 250, 255, 0.42)');
+  outerBeamGrad.addColorStop(0.3, 'rgba(186, 230, 253, 0.28)');
+  outerBeamGrad.addColorStop(0.65, 'rgba(56, 189, 248, 0.14)');
+  outerBeamGrad.addColorStop(1, 'rgba(56, 189, 248, 0)');
+
+  ctx.fillStyle = outerBeamGrad;
   ctx.beginPath();
-  ctx.moveTo(15, 0);
-  ctx.arc(0, 0, player.lightDistance, -player.lightConeAngle / 2, player.lightConeAngle / 2);
+  ctx.moveTo(20, 0);
+  ctx.arc(
+    0,
+    0,
+    player.lightDistance,
+    -player.lightConeAngle / 2,
+    player.lightConeAngle / 2
+  );
   ctx.closePath();
   ctx.fill();
+
+  // Focused High-Power Central Beam Core
+  const coreBeamGrad = ctx.createRadialGradient(
+    20,
+    0,
+    5,
+    160,
+    0,
+    player.lightDistance * 0.75
+  );
+  coreBeamGrad.addColorStop(0, 'rgba(255, 255, 255, 0.65)');
+  coreBeamGrad.addColorStop(0.35, 'rgba(224, 242, 254, 0.35)');
+  coreBeamGrad.addColorStop(0.75, 'rgba(125, 211, 252, 0.12)');
+  coreBeamGrad.addColorStop(1, 'rgba(125, 211, 252, 0)');
+
+  ctx.fillStyle = coreBeamGrad;
+  ctx.beginPath();
+  ctx.moveTo(20, 0);
+  ctx.arc(
+    0,
+    0,
+    player.lightDistance * 0.75,
+    -player.lightConeAngle / 3.8,
+    player.lightConeAngle / 3.8
+  );
+  ctx.closePath();
+  ctx.fill();
+
+  // Headlight Lens Flare & Corona
+  const flareGrad = ctx.createRadialGradient(21, 0, 1, 21, 0, 24);
+  flareGrad.addColorStop(0, 'rgba(255, 255, 255, 0.95)');
+  flareGrad.addColorStop(0.4, 'rgba(186, 230, 253, 0.6)');
+  flareGrad.addColorStop(1, 'rgba(56, 189, 248, 0)');
+  ctx.fillStyle = flareGrad;
+  ctx.beginPath();
+  ctx.arc(21, 0, 24, 0, Math.PI * 2);
+  ctx.fill();
+
   ctx.restore();
 
-  // 2. Submarine Hull
-  ctx.rotate(player.angle);
-
-  const hullGlow = ctx.createRadialGradient(0, 0, 2, 0, 0, 36);
-  hullGlow.addColorStop(0, 'rgba(56, 189, 248, 0.3)');
-  hullGlow.addColorStop(1, 'rgba(56, 189, 248, 0)');
-  ctx.fillStyle = hullGlow;
+  // 2. Submarine Hull Perimeter Ambient Glow
+  const hullAura = ctx.createRadialGradient(0, 0, 4, 0, 0, 50);
+  hullAura.addColorStop(0, 'rgba(56, 189, 248, 0.35)');
+  hullAura.addColorStop(1, 'rgba(56, 189, 248, 0)');
+  ctx.fillStyle = hullAura;
   ctx.beginPath();
-  ctx.arc(0, 0, 36, 0, Math.PI * 2);
+  ctx.arc(0, 0, 50, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.fillStyle = '#0f172a';
+  // 3. Submarine Hull
+  ctx.fillStyle = '#0a1420';
   ctx.strokeStyle = '#38bdf8';
-  ctx.lineWidth = 2.5;
+  ctx.lineWidth = 2.4;
 
   ctx.beginPath();
-  ctx.ellipse(0, 0, 22, 12, 0, 0, Math.PI * 2);
+  ctx.ellipse(0, 0, 22, 11, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.stroke();
 
+  // Cockpit dome
   ctx.fillStyle = '#0284c7';
   ctx.beginPath();
-  ctx.arc(6, 0, 7, 0, Math.PI * 2);
+  ctx.arc(6, 0, 6, 0, Math.PI * 2);
   ctx.fill();
   ctx.strokeStyle = '#e0f2fe';
-  ctx.lineWidth = 1.5;
+  ctx.lineWidth = 1.4;
   ctx.stroke();
 
+  // Engine mount & propeller
   ctx.fillStyle = '#1e293b';
-  ctx.fillRect(-22, -6, 6, 12);
+  ctx.fillRect(-22, -5, 5, 10);
 
-  ctx.fillStyle = '#f8fafc';
+  // Forward headlight fixture
+  ctx.fillStyle = '#ffffff';
   ctx.beginPath();
   ctx.arc(21, 0, 3.5, 0, Math.PI * 2);
   ctx.fill();
@@ -484,38 +1072,29 @@ function drawPlayerSubmarine(
   ctx.restore();
 }
 
-function drawCompanionSubmarine(
+/**
+ * Rescued Companion upon measurement success
+ */
+function drawRescuedCompanion(
   ctx: CanvasRenderingContext2D,
-  node: any,
-  player: any,
-  animProgress: number
+  loc: AnomalyLocation,
+  progress: number
 ) {
+  const compX = loc.x;
+  const compY = loc.y - 40 * progress;
+
   ctx.save();
-  const time = performance.now() * 0.001;
+  ctx.translate(compX, compY);
 
-  const compX = node.x;
-  const compY = node.y - 45 * animProgress;
-
-  ctx.strokeStyle = `rgba(250, 204, 21, ${0.4 + 0.4 * Math.sin(time * 6)})`;
-  ctx.lineWidth = 3;
-  ctx.setLineDash([8, 8]);
-  ctx.lineDashOffset = -time * 40;
-  ctx.beginPath();
-  ctx.moveTo(player.x, player.y);
-  ctx.lineTo(compX, compY);
-  ctx.stroke();
-  ctx.setLineDash([]);
-
-  const aura = ctx.createRadialGradient(compX, compY, 5, compX, compY, 70);
-  aura.addColorStop(0, 'rgba(250, 204, 21, 0.8)');
-  aura.addColorStop(0.5, 'rgba(234, 179, 8, 0.3)');
+  const aura = ctx.createRadialGradient(0, 0, 3, 0, 0, 75);
+  aura.addColorStop(0, 'rgba(250, 204, 21, 0.85)');
+  aura.addColorStop(0.5, 'rgba(234, 179, 8, 0.35)');
   aura.addColorStop(1, 'rgba(234, 179, 8, 0)');
   ctx.fillStyle = aura;
   ctx.beginPath();
-  ctx.arc(compX, compY, 70, 0, Math.PI * 2);
+  ctx.arc(0, 0, 75, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.translate(compX, compY);
   ctx.fillStyle = '#1c1917';
   ctx.strokeStyle = '#facc15';
   ctx.lineWidth = 2.5;
@@ -530,23 +1109,233 @@ function drawCompanionSubmarine(
   ctx.arc(5, 0, 6, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.font = 'bold 12px "JetBrains Mono", monospace';
+  ctx.font = 'bold 11px monospace';
   ctx.fillStyle = '#fef08a';
   ctx.textAlign = 'center';
-  ctx.fillText('LUMA LOCATED', 0, -22);
+  ctx.fillText('LUMA LOCATED', 0, -20);
 
   ctx.restore();
 }
 
-function drawVignette(ctx: CanvasRenderingContext2D, w: number, h: number) {
+/**
+ * Cavitation Bubbles
+ */
+function drawBubbles(ctx: CanvasRenderingContext2D, bubbles: any[]) {
+  bubbles.forEach(b => {
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.size, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(215, 245, 255, ${b.alpha})`;
+    ctx.fill();
+    ctx.strokeStyle = `rgba(125, 211, 252, ${b.alpha * 0.7})`;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  });
+}
+
+/**
+ * Torch & Ocean Darkness Mask
+ * Cuts out torch cone and ambient halo to make the torch the primary source of visibility.
+ */
+function drawTorchDarknessMask(
+  ctx: CanvasRenderingContext2D,
+  viewWidth: number,
+  viewHeight: number,
+  player: any,
+  cameraX: number,
+  cameraY: number,
+  echoPulses: any[],
+  pendingBlinks: any[]
+) {
+  // Screen-space player position
+  const screenPX = player.x - cameraX;
+  const screenPY = player.y - cameraY;
+
   ctx.save();
-  const rad = Math.hypot(w, h) * 0.5;
+
+  // Create an offscreen-like composite mask on screen canvas
+  // We use destination-out to erase darkness where light shines
+  const tempCanvas = document.createElement('canvas');
+  tempCanvas.width = viewWidth;
+  tempCanvas.height = viewHeight;
+  const maskCtx = tempCanvas.getContext('2d');
+
+  if (maskCtx) {
+    // Fill darkness (softened to ~77% so ocean has subtle atmospheric ambient light)
+    maskCtx.fillStyle = 'rgba(1, 6, 14, 0.77)';
+    maskCtx.fillRect(0, 0, viewWidth, viewHeight);
+
+    maskCtx.globalCompositeOperation = 'destination-out';
+
+    // 1. Cut out Forward High-Intensity Torch Beam
+    maskCtx.save();
+    maskCtx.translate(screenPX, screenPY);
+    maskCtx.rotate(player.angle);
+
+    const beamGrad = maskCtx.createRadialGradient(
+      15,
+      0,
+      5,
+      200,
+      0,
+      player.lightDistance
+    );
+    beamGrad.addColorStop(0, 'rgba(0, 0, 0, 1.0)');
+    beamGrad.addColorStop(0.65, 'rgba(0, 0, 0, 1.0)');
+    beamGrad.addColorStop(0.85, 'rgba(0, 0, 0, 0.75)');
+    beamGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+    maskCtx.fillStyle = beamGrad;
+    maskCtx.beginPath();
+    maskCtx.moveTo(15, 0);
+    maskCtx.arc(
+      0,
+      0,
+      player.lightDistance,
+      -player.lightConeAngle / 2,
+      player.lightConeAngle / 2
+    );
+    maskCtx.closePath();
+    maskCtx.fill();
+
+    // 2. Cut out Immediate Submarine Hull Perimeter Glow (Clear visibility around player)
+    const hullHalo = maskCtx.createRadialGradient(0, 0, 4, 0, 0, 105);
+    hullHalo.addColorStop(0, 'rgba(0, 0, 0, 1.0)');
+    hullHalo.addColorStop(0.6, 'rgba(0, 0, 0, 0.85)');
+    hullHalo.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    maskCtx.fillStyle = hullHalo;
+    maskCtx.beginPath();
+    maskCtx.arc(0, 0, 105, 0, Math.PI * 2);
+    maskCtx.fill();
+
+    maskCtx.restore();
+
+    // 3. Cut out expanding acoustic ripple wave illumination
+    echoPulses.forEach(pulse => {
+      const pulseScreenX = pulse.originX - cameraX;
+      const pulseScreenY = pulse.originY - cameraY;
+
+      const waveHalo = maskCtx.createRadialGradient(
+        pulseScreenX,
+        pulseScreenY,
+        Math.max(0, pulse.radius - 20),
+        pulseScreenX,
+        pulseScreenY,
+        pulse.radius + 20
+      );
+      waveHalo.addColorStop(0, 'rgba(0, 0, 0, 0)');
+      waveHalo.addColorStop(0.5, `rgba(0, 0, 0, ${pulse.alpha * 0.55})`);
+      waveHalo.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+      maskCtx.fillStyle = waveHalo;
+      maskCtx.beginPath();
+      maskCtx.arc(pulseScreenX, pulseScreenY, pulse.radius + 20, 0, Math.PI * 2);
+      maskCtx.fill();
+    });
+
+    // 4. Cut out companion blink illumination if active
+    pendingBlinks.forEach(blink => {
+      if (!blink.isBlinking) return;
+      const bScreenX = blink.x - cameraX;
+      const bScreenY = blink.y - cameraY;
+      const progress = Math.min(1.0, blink.blinkElapsed / blink.blinkDuration);
+      const envelope = Math.sin(progress * Math.PI);
+      const prob = Math.max(0.08, Math.min(1.0, blink.targetProbability));
+      const rad = 30 + prob * 70;
+
+      const blinkHole = maskCtx.createRadialGradient(bScreenX, bScreenY, 2, bScreenX, bScreenY, rad);
+      blinkHole.addColorStop(0, `rgba(0, 0, 0, ${envelope * (0.3 + prob * 0.6)})`);
+      blinkHole.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      maskCtx.fillStyle = blinkHole;
+      maskCtx.beginPath();
+      maskCtx.arc(bScreenX, bScreenY, rad, 0, Math.PI * 2);
+      maskCtx.fill();
+    });
+
+    // Draw the final darkness mask over the canvas
+    ctx.drawImage(tempCanvas, 0, 0);
+  }
+
+  ctx.restore();
+}
+
+/**
+ * Cinematic Vignette
+ */
+function drawCinematicVignette(ctx: CanvasRenderingContext2D, w: number, h: number) {
+  ctx.save();
+  const rad = Math.hypot(w, h) * 0.52;
   const grad = ctx.createRadialGradient(w / 2, h / 2, rad * 0.45, w / 2, h / 2, rad);
-  grad.addColorStop(0, 'rgba(0, 2, 8, 0)');
-  grad.addColorStop(0.7, 'rgba(0, 2, 8, 0.4)');
-  grad.addColorStop(1, 'rgba(0, 2, 8, 0.88)');
+  grad.addColorStop(0, 'rgba(0, 2, 6, 0)');
+  grad.addColorStop(0.7, 'rgba(0, 2, 6, 0.35)');
+  grad.addColorStop(1, 'rgba(0, 1, 4, 0.72)');
 
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, w, h);
   ctx.restore();
+}
+
+/**
+ * Quantum Collapse Sequence Visualizer (Reveals which spire was measured vs true target)
+ */
+function drawQuantumCollapseSequence(
+  ctx: CanvasRenderingContext2D,
+  world: WorldData,
+  result: any
+) {
+  if (!result) return;
+  const time = performance.now() * 0.001;
+  const measuredLoc = world.locations[result.measuredIndex];
+  if (!measuredLoc) return;
+
+  ctx.save();
+  ctx.translate(measuredLoc.x, measuredLoc.y);
+
+  const isTarget = result.isTarget;
+  const pulseRadius = 45 + 25 * Math.sin(time * 12);
+  const ringColor = isTarget ? 'rgba(250, 204, 21, 0.9)' : 'rgba(244, 63, 94, 0.85)';
+
+  ctx.strokeStyle = ringColor;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(0, 0, pulseRadius, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Quantum measurement reticle
+  ctx.beginPath();
+  ctx.moveTo(-pulseRadius - 12, 0);
+  ctx.lineTo(pulseRadius + 12, 0);
+  ctx.moveTo(0, -pulseRadius - 12);
+  ctx.lineTo(0, pulseRadius + 12);
+  ctx.stroke();
+
+  ctx.font = 'bold 12px "JetBrains Mono", monospace';
+  ctx.fillStyle = isTarget ? '#fef08a' : '#fda4af';
+  ctx.textAlign = 'center';
+  ctx.fillText(
+    isTarget
+      ? 'STATE COLLAPSED: TARGET LOCKED'
+      : `COLLAPSED: DECOY SPIRE (${(result.targetProbability * 100).toFixed(0)}% AMPLITUDE)`,
+    0,
+    -pulseRadius - 18
+  );
+
+  ctx.restore();
+
+  // If measured incorrectly, briefly show faint spectral clue where the true target was
+  if (!isTarget && world.locations[result.targetIndex]) {
+    const trueTarget = world.locations[result.targetIndex];
+    ctx.save();
+    ctx.translate(trueTarget.x, trueTarget.y);
+    ctx.strokeStyle = 'rgba(56, 189, 248, 0.5)';
+    ctx.setLineDash([5, 5]);
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, 48, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.font = '10px monospace';
+    ctx.fillStyle = 'rgba(56, 189, 248, 0.8)';
+    ctx.textAlign = 'center';
+    ctx.fillText('TARGET PHASE LOCATION', 0, -56);
+    ctx.restore();
+  }
 }

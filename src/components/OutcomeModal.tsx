@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { GameEngine } from '../game/gameState';
-import { CheckCircle2, XCircle, RotateCcw, ArrowRight, BarChart3 } from 'lucide-react';
+import { CheckCircle2, XCircle, RotateCcw, ArrowRight, BarChart3, Info } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 interface OutcomeModalProps {
@@ -19,6 +19,8 @@ export const OutcomeModal: React.FC<OutcomeModalProps> = ({
   const { status, level, measurementResult, callsCount, grover, player } = engine;
   const isSuccess = status === 'success';
   const isOxygenDepleted = player.oxygen <= 0;
+  const opt = grover.optimalIterations;
+  const isOvershot = callsCount > opt;
 
   useEffect(() => {
     if (isSuccess) {
@@ -35,89 +37,125 @@ export const OutcomeModal: React.FC<OutcomeModalProps> = ({
     ? (measurementResult.targetProbability * 100).toFixed(1)
     : (grover.getTargetProbability() * 100).toFixed(1);
 
+  const measuredIdx = measurementResult ? measurementResult.measuredIndex + 1 : 1;
+  const targetIdx = engine.world.targetIndex + 1;
+
+  // Educational collapse explanation
+  let collapseInsight = '';
+  if (isSuccess) {
+    collapseInsight = `Measurement successfully collapsed the wave onto Target Spire ${targetIdx} with ${targetProb}% quantum amplitude clarity!`;
+  } else if (isOxygenDepleted) {
+    collapseInsight = 'Life support depleted before amplitude resonance could be locked.';
+  } else if (isOvershot) {
+    collapseInsight = `Destructive interference overshot the peak! Amplitude dispersed down to ${targetProb}%, and the wave collapsed onto Decoy Spire ${measuredIdx}.`;
+  } else {
+    collapseInsight = `Measured prematurely at ${targetProb}% clarity. The quantum superposition collapsed onto Decoy Spire ${measuredIdx} instead of Target Spire ${targetIdx}.`;
+  }
+
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-xl flex items-center justify-center p-4 select-none">
       <div
-        className={`max-w-xl w-full bg-gradient-to-b from-slate-900 to-slate-950 border rounded-3xl p-6 sm:p-8 shadow-2xl flex flex-col gap-6 text-slate-100 animate-in fade-in zoom-in-95 duration-300 ${
+        className={`max-w-xl w-full bg-gradient-to-b from-slate-900 to-slate-950 border rounded-3xl p-6 sm:p-8 shadow-2xl flex flex-col gap-5 text-slate-100 animate-in fade-in zoom-in-95 duration-300 ${
           isSuccess
             ? 'border-cyan-500/60 shadow-[0_0_60px_rgba(6,182,212,0.25)]'
             : 'border-rose-900/60 shadow-[0_0_60px_rgba(244,63,94,0.15)]'
         }`}
       >
         {/* Header Badge & Title */}
-        <div className="flex flex-col items-center text-center gap-3 border-b border-slate-800/80 pb-5">
+        <div className="flex flex-col items-center text-center gap-2.5 border-b border-slate-800/80 pb-4">
           <div
-            className={`p-3.5 rounded-2xl flex items-center justify-center ${
+            className={`p-3 rounded-2xl flex items-center justify-center ${
               isSuccess
                 ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-400/40'
                 : 'bg-rose-500/20 text-rose-400 border border-rose-500/40'
             }`}
           >
-            {isSuccess ? <CheckCircle2 className="w-8 h-8" /> : <XCircle className="w-8 h-8" />}
+            {isSuccess ? <CheckCircle2 className="w-7 h-7" /> : <XCircle className="w-7 h-7" />}
           </div>
           <div>
-            <h2 className="text-2xl sm:text-3xl font-bold font-serif tracking-wide">
-              {isSuccess ? 'COMPANION RESCUED' : isOxygenDepleted ? 'OXYGEN DEPLETED' : 'MEASUREMENT MISSED'}
+            <h2 className="text-xl sm:text-2xl font-bold font-serif tracking-wide">
+              {isSuccess
+                ? 'COMPANION LOCATED (STATE COLLAPSED)'
+                : isOxygenDepleted
+                ? 'OXYGEN DEPLETED'
+                : 'COLLAPSED ONTO DECOY SPIRE'}
             </h2>
-            <p className="text-xs sm:text-sm text-slate-400 font-mono mt-1">
+            <p className="text-xs text-slate-400 font-mono mt-0.5">
               {level.title} • {level.depthMeters}m Abyss
             </p>
           </div>
         </div>
 
         {/* Narrative Outcome */}
-        <div className="text-sm sm:text-base text-slate-300 italic text-center bg-slate-950/60 p-4 rounded-2xl border border-slate-800/60 leading-relaxed">
+        <div className="text-xs sm:text-sm text-slate-300 italic text-center bg-slate-950/60 p-3.5 rounded-2xl border border-slate-800/60 leading-relaxed">
           "{isSuccess ? level.narrativeSuccess : level.narrativeFailure}"
         </div>
 
+        {/* Quantum Collapse Educational Insight */}
+        <div
+          className={`p-3.5 rounded-2xl border flex items-start gap-3 text-xs font-mono leading-relaxed ${
+            isSuccess
+              ? 'bg-cyan-950/30 border-cyan-800/40 text-cyan-200'
+              : 'bg-rose-950/30 border-rose-800/40 text-rose-200'
+          }`}
+        >
+          <Info className={`w-4 h-4 shrink-0 mt-0.5 ${isSuccess ? 'text-cyan-400' : 'text-rose-400'}`} />
+          <div>
+            <span className="font-bold uppercase tracking-wider block mb-0.5">
+              {isSuccess ? 'Quantum Resonance Confirmed' : 'Quantum Dispersion Breakdown'}
+            </span>
+            <span>{collapseInsight}</span>
+          </div>
+        </div>
+
         {/* Dive Metrics */}
-        <div className="grid grid-cols-3 gap-3">
-          <div className="bg-slate-950/80 border border-slate-800 p-3 rounded-2xl flex flex-col items-center text-center">
-            <span className="text-[10px] sm:text-xs font-mono text-slate-400">PULSES SENT</span>
-            <span className="text-lg font-bold text-cyan-300 font-mono mt-0.5">{callsCount} Calls</span>
+        <div className="grid grid-cols-3 gap-2.5">
+          <div className="bg-slate-950/80 border border-slate-800 p-2.5 rounded-2xl flex flex-col items-center text-center">
+            <span className="text-[10px] font-mono text-slate-400">PULSES (CALLS)</span>
+            <span className="text-base font-bold text-cyan-300 font-mono mt-0.5">{callsCount} Pulses</span>
           </div>
 
-          <div className="bg-slate-950/80 border border-slate-800 p-3 rounded-2xl flex flex-col items-center text-center">
-            <span className="text-[10px] sm:text-xs font-mono text-slate-400">TARGET CLARITY</span>
-            <span className="text-lg font-bold text-cyan-300 font-mono mt-0.5">{targetProb}%</span>
+          <div className="bg-slate-950/80 border border-slate-800 p-2.5 rounded-2xl flex flex-col items-center text-center">
+            <span className="text-[10px] font-mono text-slate-400">TARGET PROBABILITY</span>
+            <span className="text-base font-bold text-cyan-300 font-mono mt-0.5">{targetProb}%</span>
           </div>
 
-          <div className="bg-slate-950/80 border border-slate-800 p-3 rounded-2xl flex flex-col items-center text-center">
-            <span className="text-[10px] sm:text-xs font-mono text-slate-400">O₂ REMAINING</span>
-            <span className="text-lg font-bold text-cyan-300 font-mono mt-0.5">
-              {Math.max(0, Math.ceil(player.oxygen))}%
+          <div className="bg-slate-950/80 border border-slate-800 p-2.5 rounded-2xl flex flex-col items-center text-center">
+            <span className="text-[10px] font-mono text-slate-400">MEASURED RESULT</span>
+            <span className={`text-base font-bold font-mono mt-0.5 ${isSuccess ? 'text-emerald-400' : 'text-rose-400'}`}>
+              Spire {measuredIdx}
             </span>
           </div>
         </div>
 
         {/* Action Buttons */}
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-2.5">
           {isSuccess && (
             <button
               onClick={onNextLevel}
-              className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-cyan-600 via-cyan-500 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-slate-950 font-bold text-sm tracking-wider uppercase flex items-center justify-center gap-2 shadow-[0_0_25px_rgba(6,182,212,0.35)] transition-all cursor-pointer active:scale-98"
+              className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-cyan-600 via-cyan-500 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-slate-950 font-bold text-xs sm:text-sm tracking-wider uppercase flex items-center justify-center gap-2 shadow-[0_0_25px_rgba(6,182,212,0.35)] transition-all cursor-pointer active:scale-98"
             >
-              <span>DESCEND TO NEXT CHAPTER</span>
+              <span>DESCEND TO NEXT LEVEL</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           )}
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
             <button
               onClick={onRetry}
-              className="flex-1 py-3.5 rounded-2xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 font-semibold text-xs sm:text-sm tracking-wider uppercase flex items-center justify-center gap-2 transition-all cursor-pointer"
+              className="flex-1 py-3 rounded-2xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 font-semibold text-xs tracking-wider uppercase flex items-center justify-center gap-2 transition-all cursor-pointer"
             >
-              <RotateCcw className="w-4 h-4" />
+              <RotateCcw className="w-3.5 h-3.5" />
               <span>DIVE AGAIN</span>
             </button>
 
             {/* Quantum Replay / Analysis Button */}
             <button
               onClick={onOpenReplay}
-              className="flex-1 py-3.5 rounded-2xl bg-gradient-to-r from-purple-950/80 to-indigo-950/80 hover:from-purple-900 hover:to-indigo-900 border border-purple-500/50 text-purple-200 font-semibold text-xs sm:text-sm tracking-wider uppercase flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(168,85,247,0.2)] transition-all cursor-pointer"
+              className="flex-1 py-3 rounded-2xl bg-gradient-to-r from-purple-950/80 to-indigo-950/80 hover:from-purple-900 hover:to-indigo-900 border border-purple-500/50 text-purple-200 font-semibold text-xs tracking-wider uppercase flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(168,85,247,0.2)] transition-all cursor-pointer"
             >
-              <BarChart3 className="w-4 h-4 text-purple-400" />
-              <span>ECHO ANALYSIS (QUANTUM)</span>
+              <BarChart3 className="w-3.5 h-3.5 text-purple-400" />
+              <span>QUANTUM REPLAY</span>
             </button>
           </div>
         </div>

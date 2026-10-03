@@ -1,7 +1,7 @@
 import { GroverSimulator } from '../quantum/grover';
 import { MeasurementResult } from '../quantum/measurement';
 import { LevelConfig, CAMPAIGN_LEVELS } from './levels';
-import { WorldData, generateWorld, Bubble, AnomalyNode } from './proceduralGeneration';
+import { WorldData, generateWorld, AnomalyLocation, Creature, BioPlant } from './proceduralGeneration';
 import { sound } from '../audio/sound';
 
 export interface EchoPulse {
@@ -14,7 +14,28 @@ export interface EchoPulse {
   alpha: number;
   color: string;
   targetProbability: number;
-  hitNodes: Set<number>;
+  hitLocations: Set<number>;
+}
+
+export interface CavitationBubble {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  size: number;
+  alpha: number;
+  maxLife: number;
+  life: number;
+}
+
+export interface CompanionBlinkState {
+  delayTimer: number; // counts down ~2.4s before blink starts
+  isBlinking: boolean;
+  blinkDuration: number; // total duration of the brief glimpse
+  blinkElapsed: number;
+  targetProbability: number;
+  x: number;
+  y: number;
 }
 
 export interface PlayerState {
@@ -45,20 +66,23 @@ export class GameEngine {
   grover: GroverSimulator;
   player: PlayerState;
   status: GameStatus = 'briefing';
-  
+
   // Dynamic visual/audio effects
   echoPulses: EchoPulse[] = [];
-  bubbles: Bubble[] = [];
+  bubbles: CavitationBubble[] = [];
   pulseCounter: number = 0;
-  
+
+  // Delayed Companion Blink queue
+  pendingBlinks: CompanionBlinkState[] = [];
+
   // Game stats for current run
   callsCount: number = 0;
   measurementResult: MeasurementResult | null = null;
-  companionRescueAnimation: number = 0; // 0 to 1 progress
-  
+  companionRescueAnimation: number = 0; // 0 to 1 progress on success
+
   // Input keys
   keys: { [key: string]: boolean } = {};
-  
+
   // Callbacks for UI updates
   onStateChange?: () => void;
 
@@ -66,7 +90,7 @@ export class GameEngine {
     this.level = level;
     this.world = generateWorld(level);
     this.grover = new GroverSimulator(level.n, this.world.targetIndex);
-    
+
     this.player = {
       x: this.world.playerStart.x,
       y: this.world.playerStart.y,
@@ -76,8 +100,8 @@ export class GameEngine {
       oxygen: level.initialOxygen,
       maxOxygen: level.initialOxygen,
       isMoving: false,
-      lightConeAngle: Math.PI / 3.5,
-      lightDistance: 320,
+      lightConeAngle: Math.PI / 2.6, // ~69 degree wide searchlight beam
+      lightDistance: 520, // Extended range illumination
     };
   }
 
@@ -94,11 +118,12 @@ export class GameEngine {
       oxygen: level.initialOxygen,
       maxOxygen: level.initialOxygen,
       isMoving: false,
-      lightConeAngle: Math.PI / 3.5,
-      lightDistance: 320,
+      lightConeAngle: Math.PI / 2.6,
+      lightDistance: 520,
     };
     this.echoPulses = [];
     this.bubbles = [];
+    this.pendingBlinks = [];
     this.callsCount = 0;
     this.measurementResult = null;
     this.companionRescueAnimation = 0;
@@ -113,33 +138,29 @@ export class GameEngine {
   }
 
   /**
-   * Action: CALL (Send Echo Pulse)
-   * Corresponds directly to ONE Grover Amplitude Amplification iteration!
+   * Action: CALL
+   * Real Grover iteration → expanding acoustic ripple → environmental reaction →
+   * wait ~2.4s → brief companion glimpse fades in & out.
    */
   public call(): boolean {
     if (this.status !== 'exploring') return false;
     if (this.player.oxygen <= 0) return false;
 
-    // Deduct oxygen cost
+    // 1. Deduct oxygen cost
     this.player.oxygen = Math.max(0, this.player.oxygen - this.level.callOxygenCost);
     this.callsCount++;
 
-    // Execute genuine Grover iteration
+    // 2. Execute genuine Grover iteration
     this.grover.step();
     const targetProb = this.grover.getTargetProbability();
     const opt = this.grover.optimalIterations;
     const isPeak = this.grover.iterations === opt;
     const isOvershot = this.grover.iterations > opt;
 
-    // Play procedural dynamic Web Audio sound
+    // 3. Play dynamic Web Audio sonar ping derived from real quantum probability
     sound.playEchoPulse(targetProb, isPeak, isOvershot);
 
-    // Alert predators in vicinity
-    this.world.predators.forEach(p => {
-      p.aggroLevel = Math.min(1.0, p.aggroLevel + 0.35);
-    });
-
-    // Create expanding echo pulse wavefront
+    // 4. Create expanding underwater pressure ripple
     const pulseColor = isPeak
       ? '#38bdf8'
       : isOvershot
@@ -150,26 +171,31 @@ export class GameEngine {
       id: ++this.pulseCounter,
       originX: this.player.x,
       originY: this.player.y,
-      radius: 10,
-      maxRadius: 1800,
-      speed: 480, // pixels per second
+      radius: 12,
+      maxRadius: 2200,
+      speed: 520, // expanding wavefront
       alpha: 1.0,
       color: pulseColor,
       targetProbability: targetProb,
-      hitNodes: new Set<number>(),
+      hitLocations: new Set<number>(),
     });
 
-    // Emit burst of cavitation bubbles
-    for (let i = 0; i < 12; i++) {
-      this.bubbles.push({
-        x: this.player.x + (Math.random() - 0.5) * 20,
-        y: this.player.y + (Math.random() - 0.5) * 20,
-        vx: (Math.random() - 0.5) * 2,
-        vy: -0.8 - Math.random() * 1.5,
-        size: 2 + Math.random() * 4,
-        alpha: 0.9,
-        maxLife: 2.0,
-        life: 0,
+    // 5. Environmental reaction: creatures react, plants sway, cavitation bubbles burst
+    this.triggerEnvironmentalPulseReaction();
+
+    // 6. Schedule delayed companion blink: wait ~2.3 seconds before glimpse appears
+    const targetLoc = this.world.locations[this.world.targetIndex];
+    if (targetLoc) {
+      // Duration scales with probability: 0.8s (faint glimpse) to 1.6s (peak clarity)
+      const blinkDuration = 0.8 + Math.min(1, targetProb) * 0.8;
+      this.pendingBlinks.push({
+        delayTimer: 2.3, // ~2.3 seconds delay
+        isBlinking: false,
+        blinkDuration,
+        blinkElapsed: 0,
+        targetProbability: targetProb,
+        x: targetLoc.x,
+        y: targetLoc.y,
       });
     }
 
@@ -181,9 +207,47 @@ export class GameEngine {
     return true;
   }
 
+  private triggerEnvironmentalPulseReaction() {
+    // Spawn cavitation bubbles at player thruster / hull
+    for (let i = 0; i < 14; i++) {
+      this.bubbles.push({
+        x: this.player.x + (Math.random() - 0.5) * 24,
+        y: this.player.y + (Math.random() - 0.5) * 24,
+        vx: (Math.random() - 0.5) * 2.5,
+        vy: -0.8 - Math.random() * 2.0,
+        size: 2 + Math.random() * 4,
+        alpha: 0.9,
+        maxLife: 1.8,
+        life: 0,
+      });
+    }
+
+    // Nearby fish and squid flinch and gently dart away
+    this.world.creatures.forEach((c: Creature) => {
+      const dist = Math.hypot(c.x - this.player.x, c.y - this.player.y);
+      if (dist < 800) {
+        const dx = c.x - this.player.x;
+        const dy = c.y - this.player.y;
+        const angle = Math.atan2(dy, dx);
+        const impulse = Math.max(0.5, 2.0 - dist / 400);
+        c.vx += Math.cos(angle) * impulse;
+        c.vy += Math.sin(angle) * impulse;
+        c.fleeTimer = 1.5;
+      }
+    });
+
+    // Nearby plants resonate
+    this.world.plants.forEach((p: BioPlant) => {
+      const dist = Math.hypot(p.x - this.player.x, p.y - this.player.y);
+      if (dist < 900) {
+        p.resonanceEnergy = Math.min(1.0, p.resonanceEnergy + 0.8);
+      }
+    });
+  }
+
   /**
-   * Action: LISTEN (Commit & Quantum Measurement)
-   * Triggers true quantum collapse according to state vector probabilities!
+   * Action: LISTEN
+   * Quantum measurement according to statevector probabilities!
    */
   public listen(): MeasurementResult | null {
     if (this.status !== 'exploring') return null;
@@ -195,15 +259,14 @@ export class GameEngine {
     const result = this.grover.measure();
     this.measurementResult = result;
 
-    // Mark measured node in world
-    if (this.world.nodes[result.measuredIndex]) {
-      this.world.nodes[result.measuredIndex].isMeasured = true;
+    // Mark measured location in world
+    if (this.world.locations[result.measuredIndex]) {
+      this.world.locations[result.measuredIndex].isMeasured = true;
     }
 
     // Play collapse sound
     sound.playMeasurementCollapse(result.isTarget);
 
-    // Smooth transition from listening animation to outcome
     setTimeout(() => {
       if (result.isTarget) {
         this.status = 'success';
@@ -211,13 +274,13 @@ export class GameEngine {
         this.status = 'failure';
       }
       this.notify();
-    }, 1400);
+    }, 1300);
 
     return result;
   }
 
   /**
-   * Updates game physics, movement, ocean life and particles
+   * Main game loop update
    */
   public update(dt: number) {
     if (this.status === 'menu' || this.status === 'briefing' || this.status === 'replay_analysis') {
@@ -234,30 +297,37 @@ export class GameEngine {
       }
     }
 
-    // 2. Player navigation physics
+    // 2. Player movement
     this.updatePlayer(dt);
 
-    // 3. Update expanding echo pulses
+    // 3. Update expanding pulses & environmental resonance
     this.updateEchoPulses(dt);
 
-    // 4. Update bubbles
-    this.updateBubbles(dt);
+    // 4. Update delayed companion blinks
+    this.updatePendingBlinks(dt);
 
-    // 5. Update marine life & predators
+    // 5. Update marine life
     this.updateEcosystem(dt);
 
-    // 6. Update marine snow
-    this.world.marineSnow.forEach(flake => {
-      flake.y += flake.speed * 60 * dt;
-      if (flake.y > this.world.height) {
-        flake.y = 0;
-        flake.x = Math.random() * this.world.width;
+    // 6. Update bubbles
+    this.updateBubbles(dt);
+
+    // 7. Update plankton
+    this.world.plankton.forEach(p => {
+      p.x += p.vx * 60 * dt;
+      p.y += p.vy * 60 * dt;
+      p.pulsePhase += dt * 1.5;
+      if (p.y > this.world.height) {
+        p.y = 0;
+        p.x = Math.random() * this.world.width;
       }
+      if (p.x < 0) p.x = this.world.width;
+      if (p.x > this.world.width) p.x = 0;
     });
 
-    // 7. Companion rescue animation on success
+    // 8. Companion rescue animation on success
     if (this.status === 'success' && this.companionRescueAnimation < 1.0) {
-      this.companionRescueAnimation = Math.min(1.0, this.companionRescueAnimation + dt * 0.8);
+      this.companionRescueAnimation = Math.min(1.0, this.companionRescueAnimation + dt * 0.7);
     }
   }
 
@@ -273,9 +343,9 @@ export class GameEngine {
     const isMoving = moveX !== 0 || moveY !== 0;
     this.player.isMoving = isMoving;
 
-    const acceleration = 340;
+    const acceleration = 360;
     const friction = 0.94;
-    const maxSpeed = 220;
+    const maxSpeed = 230;
 
     if (isMoving) {
       const len = Math.hypot(moveX, moveY);
@@ -283,13 +353,11 @@ export class GameEngine {
       this.player.vy += (moveY / len) * acceleration * dt;
 
       const targetAngle = Math.atan2(moveY, moveX);
-      // Smooth angle interpolation
       let angleDiff = targetAngle - this.player.angle;
       while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
       while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
       this.player.angle += angleDiff * 6 * dt;
 
-      // Spawn occasional thruster bubble
       if (Math.random() < 0.35) {
         this.bubbles.push({
           x: this.player.x - Math.cos(this.player.angle) * 22,
@@ -297,17 +365,16 @@ export class GameEngine {
           vx: -Math.cos(this.player.angle) * 1.5 + (Math.random() - 0.5),
           vy: -Math.sin(this.player.angle) * 1.5 - 0.5,
           size: 1.5 + Math.random() * 3,
-          alpha: 0.7,
+          alpha: 0.75,
           maxLife: 1.2,
           life: 0,
         });
-        if (Math.random() < 0.1) {
+        if (Math.random() < 0.08) {
           sound.playThruster();
         }
       }
     }
 
-    // Apply friction and speed clamp
     this.player.vx *= Math.pow(friction, dt * 60);
     this.player.vy *= Math.pow(friction, dt * 60);
 
@@ -317,31 +384,70 @@ export class GameEngine {
       this.player.vy = (this.player.vy / speed) * maxSpeed;
     }
 
-    this.player.x = Math.max(80, Math.min(this.world.width - 80, this.player.x + this.player.vx * dt));
-    this.player.y = Math.max(80, Math.min(this.world.height - 80, this.player.y + this.player.vy * dt));
+    this.player.x = Math.max(90, Math.min(this.world.width - 90, this.player.x + this.player.vx * dt));
+    this.player.y = Math.max(90, Math.min(this.world.height - 90, this.player.y + this.player.vy * dt));
   }
 
   private updateEchoPulses(dt: number) {
     for (let i = this.echoPulses.length - 1; i >= 0; i--) {
       const pulse = this.echoPulses[i];
       pulse.radius += pulse.speed * dt;
-      pulse.alpha = Math.max(0, 1 - (pulse.radius / pulse.maxRadius));
+      pulse.alpha = Math.max(0, 1 - pulse.radius / pulse.maxRadius);
 
-      // Check collision with anomaly nodes to trigger resonance flash
-      this.world.nodes.forEach((node: AnomalyNode) => {
-        if (!pulse.hitNodes.has(node.id)) {
-          const dist = Math.hypot(node.x - pulse.originX, node.y - pulse.originY);
-          if (Math.abs(dist - pulse.radius) < 30) {
-            pulse.hitNodes.add(node.id);
-            node.discovered = true;
-            // Excitation effect: target node resonates brighter according to P(target)!
-            node.pulsePhase = 0; // trigger immediate pulse shine
+      // Check collision with geological locations
+      this.world.locations.forEach((loc: AnomalyLocation) => {
+        if (!pulse.hitLocations.has(loc.id)) {
+          const dist = Math.hypot(loc.x - pulse.originX, loc.y - pulse.originY);
+          if (Math.abs(dist - pulse.radius) < 35) {
+            pulse.hitLocations.add(loc.id);
+            loc.discovered = true;
+            loc.resonanceExcitation = 1.0;
           }
         }
       });
 
       if (pulse.radius >= pulse.maxRadius || pulse.alpha <= 0) {
         this.echoPulses.splice(i, 1);
+      }
+    }
+  }
+
+  private updatePendingBlinks(dt: number) {
+    for (let i = this.pendingBlinks.length - 1; i >= 0; i--) {
+      const blink = this.pendingBlinks[i];
+
+      if (!blink.isBlinking) {
+        blink.delayTimer -= dt;
+        if (blink.delayTimer <= 0) {
+          // Delay elapsed! Start brief glimpse and play bio-response chime
+          blink.isBlinking = true;
+          sound.playCompanionBlink(blink.targetProbability);
+
+          // Spawn radiating golden return echo wave travelling from Luma's location through the water
+          this.echoPulses.push({
+            id: ++this.pulseCounter,
+            originX: blink.x,
+            originY: blink.y,
+            radius: 12,
+            maxRadius: 2800,
+            speed: 640,
+            alpha: 1.0,
+            color: '#facc15',
+            targetProbability: blink.targetProbability,
+            hitLocations: new Set<number>(),
+          });
+
+          // Excite target spire's resonance
+          if (this.world.locations[this.world.targetIndex]) {
+            this.world.locations[this.world.targetIndex].resonanceExcitation = 1.0;
+          }
+        }
+      } else {
+        blink.blinkElapsed += dt;
+        if (blink.blinkElapsed >= blink.blinkDuration) {
+          // Finished glimpse, remove
+          this.pendingBlinks.splice(i, 1);
+        }
       }
     }
   }
@@ -360,48 +466,58 @@ export class GameEngine {
   }
 
   private updateEcosystem(dt: number) {
-    // Roam creatures
-    this.world.creatures.forEach(c => {
-      c.x += c.vx * 60 * dt;
-      c.y += c.vy * 60 * dt;
-      c.pulsePhase += dt * (c.type === 'jellyfish' ? 2.5 : 1.5);
-
-      // Bounce off boundaries gently
-      if (c.x < 100 || c.x > this.world.width - 100) c.vx *= -1;
-      if (c.y < 100 || c.y > this.world.height - 100) c.vy *= -1;
+    // Update plants decay of excitation
+    this.world.plants.forEach(p => {
+      p.swayPhase += dt * p.swaySpeed;
+      if (p.resonanceEnergy > 0) {
+        p.resonanceEnergy = Math.max(0, p.resonanceEnergy - dt * 0.6);
+      }
     });
 
-    // Update predators
-    this.world.predators.forEach(p => {
-      // If aggro is elevated, slowly stalk toward player's last location
-      if (p.aggroLevel > 0.3) {
-        const dx = this.player.x - p.x;
-        const dy = this.player.y - p.y;
-        const dist = Math.hypot(dx, dy);
-        const stalkSpeed = 65 * p.aggroLevel;
+    // Update location excitation decay
+    this.world.locations.forEach(loc => {
+      loc.pulsePhase += dt * 1.8;
+      if (loc.resonanceExcitation > 0) {
+        loc.resonanceExcitation = Math.max(0, loc.resonanceExcitation - dt * 0.5);
+      }
+    });
 
-        if (dist > 180) {
-          p.vx = (dx / dist) * stalkSpeed;
-          p.vy = (dy / dist) * stalkSpeed;
-          p.angle = Math.atan2(dy, dx);
-        }
+    // Update creatures
+    this.world.creatures.forEach(c => {
+      if (c.fleeTimer && c.fleeTimer > 0) {
+        c.fleeTimer -= dt;
       } else {
-        // Calm circular patrol
-        p.angle += 0.4 * dt;
-        p.vx = Math.cos(p.angle) * 30;
-        p.vy = Math.sin(p.angle) * 20;
+        // Gently return velocity to roaming speed
+        const speed = Math.hypot(c.vx, c.vy);
+        const normalSpeed =
+          c.type === 'giant_whale'
+            ? 0.22
+            : c.type === 'ray'
+            ? 0.9
+            : c.type === 'squid'
+            ? 0.7
+            : c.type === 'alien_fish'
+            ? 1.0
+            : c.type === 'glowing_fish'
+            ? 0.7
+            : 0.3;
+        if (speed > normalSpeed * 1.5) {
+          c.vx *= Math.pow(0.96, dt * 60);
+          c.vy *= Math.pow(0.96, dt * 60);
+        }
       }
 
-      p.x += p.vx * dt;
-      p.y += p.vy * dt;
+      c.x += c.vx * 60 * dt;
+      c.y += c.vy * 60 * dt;
+      c.pulsePhase += dt * (c.type === 'jellyfish' ? 2.2 : 1.4);
 
-      // Aggro decays over time if player stops calling
-      p.aggroLevel = Math.max(0, p.aggroLevel - dt * 0.04);
-    });
+      if (c.type === 'ray' || c.type === 'squid' || c.type === 'alien_fish' || c.type === 'glowing_fish') {
+        c.angle = Math.atan2(c.vy, c.vx);
+      }
 
-    // Node ambient pulse
-    this.world.nodes.forEach(n => {
-      n.pulsePhase += dt * 2.0;
+      // Gentle boundary bounce
+      if (c.x < 120 || c.x > this.world.width - 120) c.vx *= -1;
+      if (c.y < 120 || c.y > this.world.height - 120) c.vy *= -1;
     });
   }
 

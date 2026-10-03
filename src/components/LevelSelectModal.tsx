@@ -18,30 +18,26 @@ export const LevelSelectModal: React.FC<LevelSelectModalProps> = ({
   // Custom Dive State
   const [customN, setCustomN] = useState<number>(8);
   const [customOxygen, setCustomOxygen] = useState<number>(80);
-  const [customNoise, setCustomNoise] = useState<boolean>(false);
-  const [customPredators, setCustomPredators] = useState<number>(0);
 
   const handleStartCustom = () => {
     const customConfig: LevelConfig = {
       id: 99,
-      title: 'EXPEDITION — CUSTOM ABYSS',
+      title: 'EXPEDITION — CUSTOM SECTOR',
       subtitle: `Deep Research Field (N = ${customN})`,
       n: customN,
-      depthMeters: 3000 + customN * 50,
+      depthMeters: 2500 + customN * 50,
       initialOxygen: customOxygen,
-      oxygenDepletionRate: 0.4,
-      callOxygenCost: 5,
-      ambientCreatureCount: 16,
-      predatorCount: customPredators,
-      environmentalNoise: customNoise,
-      narrativeIntro: `Custom simulation initialized with ${customN} candidate echo chambers. Balance acoustic pulses and listen when resonance peaks.`,
+      oxygenDepletionRate: 0.35,
+      callOxygenCost: 4,
+      ambientCreatureCount: 18,
+      narrativeIntro: `Custom dive initialized with ${customN} candidate echo chambers. Send pulses to amplify the target response and listen when resonance peaks.`,
       narrativeSuccess: 'Custom field search completed with positive locator lock!',
       narrativeFailure: 'Signal lost in custom sector.',
       biomeColor: {
-        bgTop: '#041d2d',
-        bgBottom: '#010a14',
+        bgTop: '#020b14',
+        bgBottom: '#000408',
         ambientLight: '#38bdf8',
-        nodeGlow: '#06b6d4',
+        waterFog: 'rgba(2, 11, 20, 0.95)',
       },
     };
     onSelectLevel(customConfig);
@@ -54,10 +50,10 @@ export const LevelSelectModal: React.FC<LevelSelectModalProps> = ({
         <div className="flex items-start justify-between border-b border-slate-800 pb-4">
           <div>
             <h2 className="text-xl sm:text-2xl font-bold font-serif text-white">
-              Ocean Sectors & Expeditions
+              Ocean Sectors & Levels
             </h2>
             <p className="text-xs sm:text-sm text-cyan-300 font-mono mt-0.5">
-              Select campaign chapter or launch custom dive
+              Select campaign level or configure custom dive
             </p>
           </div>
           <button
@@ -79,7 +75,7 @@ export const LevelSelectModal: React.FC<LevelSelectModalProps> = ({
             }`}
           >
             <Layers className="w-4 h-4" />
-            <span>5-Chapter Campaign</span>
+            <span>Campaign Progression</span>
           </button>
           <button
             onClick={() => setActiveTab('custom')}
@@ -90,7 +86,7 @@ export const LevelSelectModal: React.FC<LevelSelectModalProps> = ({
             }`}
           >
             <Sliders className="w-4 h-4" />
-            <span>Custom Abyss Mode</span>
+            <span>Custom Dive</span>
           </button>
         </div>
 
@@ -112,15 +108,15 @@ export const LevelSelectModal: React.FC<LevelSelectModalProps> = ({
                   <div className="flex flex-col gap-1">
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-bold font-mono text-cyan-400">
-                        CHAPTER {lvl.id}
+                        LEVEL {lvl.id}
                       </span>
                       <span className="text-[11px] font-mono text-slate-400">• {lvl.depthMeters}m</span>
                     </div>
                     <h3 className="text-sm sm:text-base font-semibold text-slate-100 group-hover:text-cyan-300 transition-colors">
-                      {lvl.title.replace(/CHAPTER [IVX]+ — /, '')}
+                      {lvl.title.replace(/LEVEL \d+ — /, '')}
                     </h3>
                     <p className="text-xs text-slate-400 font-mono">
-                      N = {lvl.n} Locations • Initial O₂: {lvl.initialOxygen}%
+                      {lvl.n} Locations • Initial O₂: {lvl.initialOxygen}%
                     </p>
                   </div>
 
@@ -140,7 +136,7 @@ export const LevelSelectModal: React.FC<LevelSelectModalProps> = ({
             {/* Search Space Size N */}
             <div className="flex flex-col gap-2">
               <label className="text-xs font-mono text-slate-400 uppercase font-semibold">
-                SEARCH SPACE SIZE (N LOCATIONS)
+                SEARCH LOCATIONS (N)
               </label>
               <div className="grid grid-cols-4 gap-2">
                 {[4, 8, 16, 32].map(nVal => (
@@ -176,51 +172,12 @@ export const LevelSelectModal: React.FC<LevelSelectModalProps> = ({
               />
             </div>
 
-            {/* Environmental Decoys Toggle */}
-            <div className="flex items-center justify-between py-1">
-              <span className="text-xs font-mono text-slate-400 font-semibold uppercase">
-                FALSE ACOUSTIC DECOYS:
-              </span>
-              <button
-                onClick={() => setCustomNoise(!customNoise)}
-                className={`px-4 py-1.5 rounded-lg border font-mono text-xs font-semibold cursor-pointer transition-colors ${
-                  customNoise
-                    ? 'bg-cyan-600 border-cyan-400 text-slate-950'
-                    : 'bg-slate-900 border-slate-800 text-slate-400'
-                }`}
-              >
-                {customNoise ? 'ENABLED' : 'DISABLED'}
-              </button>
-            </div>
-
-            {/* Hazards / Predators */}
-            <div className="flex items-center justify-between py-1">
-              <span className="text-xs font-mono text-slate-400 font-semibold uppercase">
-                ABYSSAL PREDATORS:
-              </span>
-              <div className="flex items-center gap-2">
-                {[0, 1, 2].map(count => (
-                  <button
-                    key={count}
-                    onClick={() => setCustomPredators(count)}
-                    className={`px-3 py-1.5 rounded-lg border font-mono text-xs font-semibold cursor-pointer ${
-                      customPredators === count
-                        ? 'bg-cyan-600 border-cyan-400 text-slate-950'
-                        : 'bg-slate-900 border-slate-800 text-slate-400'
-                    }`}
-                  >
-                    {count === 0 ? 'None' : `${count}`}
-                  </button>
-                ))}
-              </div>
-            </div>
-
             <button
               onClick={handleStartCustom}
               className="w-full mt-2 py-3.5 rounded-2xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-slate-950 font-bold text-sm tracking-wider uppercase flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(6,182,212,0.3)] transition-all cursor-pointer"
             >
               <Play className="w-4 h-4 fill-slate-950" />
-              <span>LAUNCH CUSTOM EXPEDITION</span>
+              <span>LAUNCH CUSTOM DIVE</span>
             </button>
           </div>
         )}
