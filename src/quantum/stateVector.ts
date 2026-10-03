@@ -1,108 +1,71 @@
+import { Complex, complex, magnitudeSquared } from './complex';
+
 /**
- * N-Qubit Quantum State Vector Simulation
+ * Represents an N-dimensional pure quantum state vector |ψ⟩ = Σ α_i |i⟩
  */
+export class QuantumState {
+  readonly n: number;
+  amplitudes: Complex[];
 
-import { Complex, C } from './complex';
-
-export class StateVector {
-  readonly numQubits: number;
-  readonly dim: number;
-  readonly amplitudes: Complex[];
-
-  constructor(numQubits: number, amplitudes?: Complex[]) {
-    this.numQubits = numQubits;
-    this.dim = 1 << numQubits;
+  constructor(n: number, amplitudes?: Complex[]) {
+    if (n <= 0) {
+      throw new Error(`Dimension N must be greater than 0, got ${n}`);
+    }
+    this.n = n;
     if (amplitudes) {
-      if (amplitudes.length !== this.dim) {
-        throw new Error(`Expected ${this.dim} amplitudes for ${numQubits} qubits, got ${amplitudes.length}`);
+      if (amplitudes.length !== n) {
+        throw new Error(`Amplitudes length (${amplitudes.length}) must match dimension N (${n})`);
       }
-      this.amplitudes = amplitudes;
+      this.amplitudes = amplitudes.map(c => ({ ...c }));
     } else {
-      // Default to |00...0>
-      this.amplitudes = new Array(this.dim).fill(C.zero);
-      this.amplitudes[0] = C.one;
+      // Default to uniform superposition |s⟩ = (1/√N) Σ |i⟩
+      const invSqrtN = 1 / Math.sqrt(n);
+      this.amplitudes = Array.from({ length: n }, () => complex(invSqrtN, 0));
     }
-  }
-
-  static fromBasis(numQubits: number, basisIndex: number): StateVector {
-    const sv = new StateVector(numQubits);
-    const amps = new Array(sv.dim).fill(C.zero);
-    amps[basisIndex] = C.one;
-    return new StateVector(numQubits, amps);
-  }
-
-  static fromBitstring(bitstring: string): StateVector {
-    const numQubits = bitstring.length;
-    const index = parseInt(bitstring, 2);
-    return StateVector.fromBasis(numQubits, index);
-  }
-
-  clone(): StateVector {
-    return new StateVector(this.numQubits, [...this.amplitudes]);
-  }
-
-  getProbability(index: number): number {
-    return C.absSq(this.amplitudes[index]);
-  }
-
-  getProbabilities(): number[] {
-    return this.amplitudes.map((a) => C.absSq(a));
-  }
-
-  getPhases(): number[] {
-    return this.amplitudes.map((a) => C.phaseDeg(a));
-  }
-
-  getPhaseRads(): number[] {
-    return this.amplitudes.map((a) => C.phase(a));
-  }
-
-  normalize(): StateVector {
-    const totalProb = this.amplitudes.reduce((sum, a) => sum + C.absSq(a), 0);
-    if (totalProb < 1e-12) return this;
-    const norm = Math.sqrt(totalProb);
-    const newAmps = this.amplitudes.map((a) => C.scale(a, 1 / norm));
-    return new StateVector(this.numQubits, newAmps);
-  }
-
-  tensor(other: StateVector): StateVector {
-    const totalQubits = this.numQubits + other.numQubits;
-    const newAmps: Complex[] = [];
-
-    for (let i = 0; i < this.dim; i++) {
-      for (let j = 0; j < other.dim; j++) {
-        newAmps.push(C.mul(this.amplitudes[i], other.amplitudes[j]));
-      }
-    }
-
-    return new StateVector(totalQubits, newAmps);
-  }
-
-  innerProduct(other: StateVector): Complex {
-    if (this.numQubits !== other.numQubits) {
-      throw new Error("Mismatched qubit counts for inner product");
-    }
-    let res = C.zero;
-    for (let i = 0; i < this.dim; i++) {
-      res = C.add(res, C.mul(C.conj(this.amplitudes[i]), other.amplitudes[i]));
-    }
-    return res;
   }
 
   /**
-   * Return formatted basis decomposition
-   * e.g. "0.707|00> - 0.707|11>"
+   * Calculates probabilities P(i) = |α_i|^2
    */
-  toDiracNotation(labels?: string[]): string {
-    const terms: string[] = [];
-    for (let i = 0; i < this.dim; i++) {
-      const amp = this.amplitudes[i];
-      if (C.absSq(amp) < 1e-6) continue;
-
-      const bitStr = labels ? labels[i] : i.toString(2).padStart(this.numQubits, '0');
-      const formattedAmp = C.format(amp, 3);
-      terms.push(`${formattedAmp}|${bitStr}⟩`);
-    }
-    return terms.length > 0 ? terms.join(' + ') : '0';
+  getProbabilities(): number[] {
+    return this.amplitudes.map(a => magnitudeSquared(a));
   }
+
+  /**
+   * Total probability check (should be ≈ 1.0)
+   */
+  totalProbability(): number {
+    return this.getProbabilities().reduce((acc, p) => acc + p, 0);
+  }
+
+  /**
+   * Verifies state normalization within epsilon
+   */
+  isNormalized(tolerance: number = 1e-6): boolean {
+    return Math.abs(this.totalProbability() - 1.0) <= tolerance;
+  }
+
+  /**
+   * Normalize state vector if slight numerical drift occurs
+   */
+  normalize(): void {
+    const norm = Math.sqrt(this.totalProbability());
+    if (norm > 0) {
+      this.amplitudes = this.amplitudes.map(a => complex(a.real / norm, a.imag / norm));
+    }
+  }
+
+  /**
+   * Clone the state vector
+   */
+  clone(): QuantumState {
+    return new QuantumState(this.n, this.amplitudes);
+  }
+}
+
+/**
+ * Creates uniform superposition |s⟩ = 1/√N Σ |i⟩
+ */
+export function createUniformSuperposition(n: number): QuantumState {
+  return new QuantumState(n);
 }

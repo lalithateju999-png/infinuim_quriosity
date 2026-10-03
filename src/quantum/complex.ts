@@ -1,91 +1,46 @@
 /**
- * Exact Complex Number Arithmetic for Quantum State Vector Simulation
+ * Complex number implementation for Quantum State Vector calculations.
  */
-
 export interface Complex {
-  readonly re: number;
-  readonly im: number;
+  readonly real: number;
+  readonly imag: number;
 }
 
-export const C = {
-  zero: { re: 0, im: 0 } as Complex,
-  one: { re: 1, im: 0 } as Complex,
-  negOne: { re: -1, im: 0 } as Complex,
-  i: { re: 0, im: 1 } as Complex,
-  negI: { re: 0, im: -1 } as Complex,
+export function complex(real: number, imag: number = 0): Complex {
+  return { real, imag };
+}
 
-  new(re: number, im: number = 0): Complex {
-    return { re, im };
-  },
+export function add(a: Complex, b: Complex): Complex {
+  return { real: a.real + b.real, imag: a.imag + b.imag };
+}
 
-  add(a: Complex, b: Complex): Complex {
-    return { re: a.re + b.re, im: a.im + b.im };
-  },
+export function subtract(a: Complex, b: Complex): Complex {
+  return { real: a.real - b.real, imag: a.imag - b.imag };
+}
 
-  sub(a: Complex, b: Complex): Complex {
-    return { re: a.re - b.re, im: a.im - b.im };
-  },
+export function multiply(a: Complex, b: Complex): Complex {
+  return {
+    real: a.real * b.real - a.imag * b.imag,
+    imag: a.real * b.imag + a.imag * b.real,
+  };
+}
 
-  mul(a: Complex, b: Complex): Complex {
-    return {
-      re: a.re * b.re - a.im * b.im,
-      im: a.re * b.im + a.im * b.re,
-    };
-  },
+export function scale(a: Complex, scalar: number): Complex {
+  return { real: a.real * scalar, imag: a.imag * scalar };
+}
 
-  scale(a: Complex, s: number): Complex {
-    return { re: a.re * s, im: a.im * s };
-  },
+export function negate(a: Complex): Complex {
+  return { real: -a.real, imag: -a.imag };
+}
 
-  conj(a: Complex): Complex {
-    return { re: a.re, im: -a.im };
-  },
+export function magnitudeSquared(a: Complex): number {
+  return a.real * a.real + a.imag * a.imag;
+}
 
-  absSq(a: Complex): number {
-    return a.re * a.re + a.im * a.im;
-  },
+export function magnitude(a: Complex): number {
+  return Math.sqrt(magnitudeSquared(a));
+}
 
-  abs(a: Complex): number {
-    return Math.sqrt(C.absSq(a));
-  },
-
-  /**
-   * Phase angle in radians [-PI, PI]
-   */
-  phase(a: Complex): number {
-    if (Math.abs(a.re) < 1e-12 && Math.abs(a.im) < 1e-12) return 0;
-    return Math.atan2(a.im, a.re);
-  },
-
-  /**
-   * Phase angle in degrees [0, 360)
-   */
-  phaseDeg(a: Complex): number {
-    const p = C.phase(a);
-    const deg = (p * 180) / Math.PI;
-    return (deg + 360) % 360;
-  },
-
-  isReal(a: Complex, tol = 1e-9): boolean {
-    return Math.abs(a.im) < tol;
-  },
-
-  isZero(a: Complex, tol = 1e-9): boolean {
-    return Math.abs(a.re) < tol && Math.abs(a.im) < tol;
-  },
-
-  format(a: Complex, precision = 3): string {
-    const r = Math.abs(a.re) < 1e-9 ? 0 : Number(a.re.toFixed(precision));
-    const i = Math.abs(a.im) < 1e-9 ? 0 : Number(a.im.toFixed(precision));
-
-    if (i === 0) return `${r}`;
-    if (r === 0) {
-      if (i === 1) return "i";
-      if (i === -1) return "-i";
-      return `${i}i`;
-    }
-    const sign = i > 0 ? "+" : "-";
-    const absI = Math.abs(i) === 1 ? "" : `${Math.abs(i)}`;
-    return `${r} ${sign} ${absI}i`;
-  },
-};
+export function phase(a: Complex): number {
+  return Math.atan2(a.imag, a.real);
+}
